@@ -10,7 +10,9 @@ import (
 )
 
 var (
-	reCreateVMUUID = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
+	reCreateVMUUID        = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
+	reMachineReadableName = regexp.MustCompile(`(?m)^name="(.+)"$`)
+	reMachineReadableUUID = regexp.MustCompile(`(?m)^UUID="(.+)"$`)
 )
 
 func parseCreateVMOutput(name, stdout string) (*VM, error) {
@@ -21,6 +23,22 @@ func parseCreateVMOutput(name, stdout string) (*VM, error) {
 
 	if vm.UUID == "" {
 		return nil, fmt.Errorf("createvm succeeded but UUID was not found in output: %s", strings.TrimSpace(stdout))
+	}
+
+	return vm, nil
+}
+
+func parseShowVMInfoOutput(stdout string) (*VM, error) {
+	vm := &VM{}
+	if matches := reMachineReadableName.FindStringSubmatch(stdout); len(matches) == 2 {
+		vm.Name = matches[1]
+	}
+	if matches := reMachineReadableUUID.FindStringSubmatch(stdout); len(matches) == 2 {
+		vm.UUID = matches[1]
+	}
+
+	if vm.Name == "" || vm.UUID == "" {
+		return nil, fmt.Errorf("showvminfo succeeded but name or UUID was not found in output: %s", strings.TrimSpace(stdout))
 	}
 
 	return vm, nil

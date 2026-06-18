@@ -55,6 +55,25 @@ func (c *Client) CreateVM(ctx context.Context, name string, opts CreateVMOptions
 	return parseCreateVMOutput(name, stdout)
 }
 
+// GetVM returns information about a registered virtual machine.
+// The id argument may be either the VM name or UUID.
+func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, errors.New("virtual machine id must not be empty")
+	}
+
+	stdout, stderr, err := c.RunWithOutput(ctx, "showvminfo", id, "--machinereadable")
+	if err != nil {
+		if vmErr := classifyVMError(stderr); vmErr != nil {
+			return nil, vmErr
+		}
+		return nil, err
+	}
+
+	return parseShowVMInfoOutput(stdout)
+}
+
 // DeleteVM unregisters a virtual machine and deletes its associated files.
 // The id argument may be either the VM name or UUID.
 func (c *Client) DeleteVM(ctx context.Context, id string) error {

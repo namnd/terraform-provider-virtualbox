@@ -110,6 +110,34 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 
 // Read refreshes the Terraform state with the latest data.
 func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state vmResourceModel
+	diags := req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	vm, err := r.vbox.GetVM(ctx, state.ID.ValueString())
+	if err != nil {
+		if errors.Is(err, vboxmanage.ErrVMNotFound) {
+			resp.State.RemoveResource(ctx)
+			return
+		}
+		resp.Diagnostics.AddError(
+			"Error reading VM",
+			"Could not read virtual machine, unexpected error:"+err.Error(),
+		)
+		return
+	}
+
+	state.Name = types.StringValue(vm.Name)
+	state.ID = types.StringValue(vm.UUID)
+
+	diags = resp.State.Set(ctx, state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 }
 
 // Update updates the resource and sets the updated Terraform state on success.

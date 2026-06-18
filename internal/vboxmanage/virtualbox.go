@@ -9,5 +9,6 @@ import "context"
 type VirtualBox interface {
 	Version(ctx context.Context) (string, error)
 	CreateVM(ctx context.Context, name string, opts CreateVMOptions) (*VM, error)
+	GetVM(ctx context.Context, id string) (*VM, error)
 	DeleteVM(ctx context.Context, id string) error
 }
