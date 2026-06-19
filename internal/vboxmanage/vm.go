@@ -8,6 +8,7 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // VM holds basic information about a VirtualBox virtual machine.
@@ -110,6 +111,29 @@ func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
 	return vm, nil
 }
 
+// GetVMRetry returns VM information, retrying transient VirtualBox session errors.
+func (c *Client) GetVMRetry(ctx context.Context, id string) (*VM, error) {
+	var lastErr error
+	for attempt := range 10 {
+		vm, err := c.GetVM(ctx, id)
+		if err == nil {
+			return vm, nil
+		}
+		if !isVMTransientError(err) {
+			return nil, err
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 300 * time.Millisecond):
+		}
+	}
+
+	return nil, lastErr
+}
+
 // UpdateVMOptions configures mutable settings for UpdateVM.
 // Only non-nil fields are applied.
 type UpdateVMOptions struct {
@@ -206,8 +230,9 @@ func (c *Client) DeleteVM(ctx context.Context, id string) error {
 		return errors.New("virtual machine id must not be empty")
 	}
 
-	// Best-effort power off so unregistervm can proceed if the VM is running.
-	_, _ = c.Run(ctx, "controlvm", id, "poweroff")
+	if err := c.ensureVMPoweredOff(ctx, id); err != nil {
+		return err
+	}
 
 	_, stderr, err := c.RunWithOutput(ctx, "unregistervm", id, "--delete-all")
 	if err != nil {

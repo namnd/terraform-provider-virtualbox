@@ -13,15 +13,19 @@ import (
 )
 
 type mockVirtualBox struct {
-	versionFn    func(ctx context.Context) (string, error)
-	createVMFn   func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
-	getVMFn      func(ctx context.Context, id string) (*vboxmanage.VM, error)
-	updateVMFn   func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
-	deleteVMFn   func(ctx context.Context, id string) error
-	createDiskFn func(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error)
-	getDiskFn    func(ctx context.Context, id string) (*vboxmanage.Disk, error)
-	updateDiskFn func(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error)
-	deleteDiskFn func(ctx context.Context, id string) error
+	versionFn         func(ctx context.Context) (string, error)
+	createVMFn        func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
+	getVMFn           func(ctx context.Context, id string) (*vboxmanage.VM, error)
+	updateVMFn        func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
+	deleteVMFn        func(ctx context.Context, id string) error
+	createDiskFn      func(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error)
+	getDiskFn         func(ctx context.Context, id string) (*vboxmanage.Disk, error)
+	updateDiskFn      func(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error)
+	deleteDiskFn      func(ctx context.Context, id string) error
+	createVMStorageFn func(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error
+	deleteVMStorageFn func(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error
+	attachStorageFn   func(ctx context.Context, vmID, controllerName string, attach vboxmanage.StorageAttach) error
+	getVMStorageFn    func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error)
 }
 
 func (m *mockVirtualBox) Version(ctx context.Context) (string, error) {
@@ -43,6 +47,10 @@ func (m *mockVirtualBox) GetVM(ctx context.Context, id string) (*vboxmanage.VM, 
 		return m.getVMFn(ctx, id)
 	}
 	return &vboxmanage.VM{Name: "test-vm", UUID: id}, nil
+}
+
+func (m *mockVirtualBox) GetVMRetry(ctx context.Context, id string) (*vboxmanage.VM, error) {
+	return m.GetVM(ctx, id)
 }
 
 func (m *mockVirtualBox) UpdateVM(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error) {
@@ -117,6 +125,47 @@ func (m *mockVirtualBox) DeleteVM(ctx context.Context, id string) error {
 		return m.deleteVMFn(ctx, id)
 	}
 	return nil
+}
+
+func (m *mockVirtualBox) CreateVMStorage(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error {
+	if m.createVMStorageFn != nil {
+		return m.createVMStorageFn(ctx, vmID, ctl)
+	}
+	return nil
+}
+
+func (m *mockVirtualBox) DeleteVMStorage(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error {
+	if m.deleteVMStorageFn != nil {
+		return m.deleteVMStorageFn(ctx, vmID, ctl)
+	}
+	return nil
+}
+
+func (m *mockVirtualBox) AttachStorage(ctx context.Context, vmID, controllerName string, attach vboxmanage.StorageAttach) error {
+	if m.attachStorageFn != nil {
+		return m.attachStorageFn(ctx, vmID, controllerName, attach)
+	}
+	return nil
+}
+
+func (m *mockVirtualBox) GetVMStorage(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error) {
+	if m.getVMStorageFn != nil {
+		return m.getVMStorageFn(ctx, vmID, controllerName, port, device)
+	}
+	return &vboxmanage.StorageCtl{
+		Name:        controllerName,
+		Type:        vboxmanage.StorageTypeIDE,
+		Controller:  vboxmanage.StorageControllerPIIX4,
+		PortCount:   2,
+		HostIOCache: true,
+		Bootable:    true,
+		Attachment: vboxmanage.StorageAttach{
+			Port:   port,
+			Device: device,
+			Type:   vboxmanage.StorageAttachTypeDVDDrive,
+			Medium: "/path/to/metal-amd64.iso",
+		},
+	}, nil
 }
 
 func TestVMResourceConfigureAcceptsVirtualBox(t *testing.T) {

@@ -10,10 +10,15 @@ type VirtualBox interface {
 	Version(ctx context.Context) (string, error)
 	CreateVM(ctx context.Context, name string, opts CreateVMOptions) (*VM, error)
 	GetVM(ctx context.Context, id string) (*VM, error)
+	GetVMRetry(ctx context.Context, id string) (*VM, error)
 	UpdateVM(ctx context.Context, id string, opts UpdateVMOptions) (*VM, error)
 	DeleteVM(ctx context.Context, id string) error
 	CreateDisk(ctx context.Context, opts CreateDiskOptions) (*Disk, error)
 	GetDisk(ctx context.Context, id string) (*Disk, error)
 	UpdateDisk(ctx context.Context, id string, opts UpdateDiskOptions) (*Disk, error)
 	DeleteDisk(ctx context.Context, id string) error
+	CreateVMStorage(ctx context.Context, vmID string, ctl StorageCtl) error
+	GetVMStorage(ctx context.Context, vmID, controllerName string, port, device int) (*StorageCtl, error)
+	DeleteVMStorage(ctx context.Context, vmID string, ctl StorageCtl) error
+	AttachStorage(ctx context.Context, vmID, controllerName string, attach StorageAttach) error
 }
