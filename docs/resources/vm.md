@@ -21,6 +21,8 @@ description: |-
 
 ### Optional
 
+- `cpus` (Number) Number of virtual CPUs.
+- `memory` (Number) Memory in megabytes.
 - `os_type` (String) VirtualBox guest OS type identifier (for example, `Linux_64`).
 
 ### Read-Only

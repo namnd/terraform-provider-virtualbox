@@ -45,7 +45,17 @@ func (m *mockVirtualBox) UpdateVM(ctx context.Context, id string, opts vboxmanag
 	if m.updateVMFn != nil {
 		return m.updateVMFn(ctx, id, opts)
 	}
-	return &vboxmanage.VM{Name: opts.Name, UUID: id}, nil
+	vm := &vboxmanage.VM{UUID: id}
+	if opts.Name != nil {
+		vm.Name = *opts.Name
+	}
+	if opts.CPUs != nil {
+		vm.CPUs = *opts.CPUs
+	}
+	if opts.Memory != nil {
+		vm.Memory = *opts.Memory
+	}
+	return vm, nil
 }
 
 func (m *mockVirtualBox) DeleteVM(ctx context.Context, id string) error {
@@ -153,18 +163,27 @@ func TestVMResourceUpdateUsesVirtualBox(t *testing.T) {
 
 	var updatedID string
 	var updatedName string
+	var updatedCPUs int
 	mock := &mockVirtualBox{
 		updateVMFn: func(_ context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error) {
 			updatedID = id
-			updatedName = opts.Name
-			return &vboxmanage.VM{Name: opts.Name, UUID: id}, nil
+			if opts.Name != nil {
+				updatedName = *opts.Name
+			}
+			if opts.CPUs != nil {
+				updatedCPUs = *opts.CPUs
+			}
+			return &vboxmanage.VM{Name: updatedName, UUID: id, CPUs: updatedCPUs}, nil
 		},
 	}
 
 	r := &vmResource{vbox: mock}
 
+	name := "renamed-vm"
+	cpus := 4
 	vm, err := r.vbox.UpdateVM(context.Background(), "00000000-0000-0000-0000-000000000001", vboxmanage.UpdateVMOptions{
-		Name: "renamed-vm",
+		Name: &name,
+		CPUs: &cpus,
 	})
 	if err != nil {
 		t.Fatalf("UpdateVM() error = %v", err)
@@ -177,6 +196,9 @@ func TestVMResourceUpdateUsesVirtualBox(t *testing.T) {
 	}
 	if vm.Name != "renamed-vm" {
 		t.Fatalf("vm.Name = %q, want %q", vm.Name, "renamed-vm")
+	}
+	if updatedCPUs != 4 {
+		t.Fatalf("updatedCPUs = %d, want %d", updatedCPUs, 4)
 	}
 }
 

@@ -46,6 +46,8 @@ encryption="disabled"
 groups="/"
 ostype="Other Linux (64-bit)"
 UUID="9f69463b-2426-49be-8ad2-cb609e20953b"
+memory=2048
+cpus=2
 CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 `
 
@@ -62,6 +64,12 @@ CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 	}
 	if vm.OSType != "Linux_64" {
 		t.Fatalf("OSType = %q, want %q", vm.OSType, "Linux_64")
+	}
+	if vm.Memory != 2048 {
+		t.Fatalf("Memory = %d, want %d", vm.Memory, 2048)
+	}
+	if vm.CPUs != 2 {
+		t.Fatalf("CPUs = %d, want %d", vm.CPUs, 2)
 	}
 }
 
