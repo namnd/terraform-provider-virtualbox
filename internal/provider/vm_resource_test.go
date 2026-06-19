@@ -13,11 +13,15 @@ import (
 )
 
 type mockVirtualBox struct {
-	versionFn  func(ctx context.Context) (string, error)
-	createVMFn func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
-	getVMFn    func(ctx context.Context, id string) (*vboxmanage.VM, error)
-	updateVMFn func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
-	deleteVMFn func(ctx context.Context, id string) error
+	versionFn    func(ctx context.Context) (string, error)
+	createVMFn   func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
+	getVMFn      func(ctx context.Context, id string) (*vboxmanage.VM, error)
+	updateVMFn   func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
+	deleteVMFn   func(ctx context.Context, id string) error
+	createDiskFn func(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error)
+	getDiskFn    func(ctx context.Context, id string) (*vboxmanage.Disk, error)
+	updateDiskFn func(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error)
+	deleteDiskFn func(ctx context.Context, id string) error
 }
 
 func (m *mockVirtualBox) Version(ctx context.Context) (string, error) {
@@ -56,6 +60,56 @@ func (m *mockVirtualBox) UpdateVM(ctx context.Context, id string, opts vboxmanag
 		vm.Memory = *opts.Memory
 	}
 	return vm, nil
+}
+
+func (m *mockVirtualBox) CreateDisk(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error) {
+	if m.createDiskFn != nil {
+		return m.createDiskFn(ctx, opts)
+	}
+	return &vboxmanage.Disk{
+		UUID:     "00000000-0000-0000-0000-000000000002",
+		FilePath: opts.FilePath,
+		Size:     opts.Size,
+		Format:   opts.Format,
+		Variant:  opts.Variant,
+	}, nil
+}
+
+func (m *mockVirtualBox) GetDisk(ctx context.Context, id string) (*vboxmanage.Disk, error) {
+	if m.getDiskFn != nil {
+		return m.getDiskFn(ctx, id)
+	}
+	return &vboxmanage.Disk{
+		UUID:     "00000000-0000-0000-0000-000000000002",
+		FilePath: id,
+		Size:     1024,
+		Format:   vboxmanage.DiskFormatVDI,
+		Variant:  vboxmanage.DiskVariantStandard,
+	}, nil
+}
+
+func (m *mockVirtualBox) UpdateDisk(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error) {
+	if m.updateDiskFn != nil {
+		return m.updateDiskFn(ctx, id, opts)
+	}
+	size := 1024
+	if opts.Size != nil {
+		size = *opts.Size
+	}
+	return &vboxmanage.Disk{
+		UUID:     "00000000-0000-0000-0000-000000000002",
+		FilePath: id,
+		Size:     size,
+		Format:   vboxmanage.DiskFormatVDI,
+		Variant:  vboxmanage.DiskVariantStandard,
+	}, nil
+}
+
+func (m *mockVirtualBox) DeleteDisk(ctx context.Context, id string) error {
+	if m.deleteDiskFn != nil {
+		return m.deleteDiskFn(ctx, id)
+	}
+	return nil
 }
 
 func (m *mockVirtualBox) DeleteVM(ctx context.Context, id string) error {

@@ -12,4 +12,8 @@ type VirtualBox interface {
 	GetVM(ctx context.Context, id string) (*VM, error)
 	UpdateVM(ctx context.Context, id string, opts UpdateVMOptions) (*VM, error)
 	DeleteVM(ctx context.Context, id string) error
+	CreateDisk(ctx context.Context, opts CreateDiskOptions) (*Disk, error)
+	GetDisk(ctx context.Context, id string) (*Disk, error)
+	UpdateDisk(ctx context.Context, id string, opts UpdateDiskOptions) (*Disk, error)
+	DeleteDisk(ctx context.Context, id string) error
 }
