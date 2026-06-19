@@ -160,6 +160,41 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// retrieve values from plan
+	var plan vmResourceModel
+	var state vmResourceModel
+
+	diags := req.Plan.Get(ctx, &plan)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !plan.Name.Equal(state.Name) {
+		vm, err := r.vbox.UpdateVM(ctx, state.ID.ValueString(), vboxmanage.UpdateVMOptions{
+			Name: plan.Name.ValueString(),
+		})
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Error updating VM",
+				"Could not update virtual machine, unexpected error:"+err.Error(),
+			)
+			return
+		}
+		plan.Name = types.StringValue(vm.Name)
+	}
+
+	plan.ID = state.ID
+	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
+
+	diags = resp.State.Set(ctx, plan)
+	resp.Diagnostics.Append(diags...)
 }
 
 // Delete deletes the resource and removes the Terraform state on success.

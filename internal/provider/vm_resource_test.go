@@ -16,6 +16,7 @@ type mockVirtualBox struct {
 	versionFn  func(ctx context.Context) (string, error)
 	createVMFn func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
 	getVMFn    func(ctx context.Context, id string) (*vboxmanage.VM, error)
+	updateVMFn func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
 	deleteVMFn func(ctx context.Context, id string) error
 }
 
@@ -38,6 +39,13 @@ func (m *mockVirtualBox) GetVM(ctx context.Context, id string) (*vboxmanage.VM, 
 		return m.getVMFn(ctx, id)
 	}
 	return &vboxmanage.VM{Name: "test-vm", UUID: id}, nil
+}
+
+func (m *mockVirtualBox) UpdateVM(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error) {
+	if m.updateVMFn != nil {
+		return m.updateVMFn(ctx, id, opts)
+	}
+	return &vboxmanage.VM{Name: opts.Name, UUID: id}, nil
 }
 
 func (m *mockVirtualBox) DeleteVM(ctx context.Context, id string) error {
@@ -137,6 +145,38 @@ func TestVMResourceReadUsesVirtualBox(t *testing.T) {
 	}
 	if vm.UUID != "00000000-0000-0000-0000-000000000001" {
 		t.Fatalf("vm.UUID = %q, want %q", vm.UUID, "00000000-0000-0000-0000-000000000001")
+	}
+}
+
+func TestVMResourceUpdateUsesVirtualBox(t *testing.T) {
+	t.Parallel()
+
+	var updatedID string
+	var updatedName string
+	mock := &mockVirtualBox{
+		updateVMFn: func(_ context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error) {
+			updatedID = id
+			updatedName = opts.Name
+			return &vboxmanage.VM{Name: opts.Name, UUID: id}, nil
+		},
+	}
+
+	r := &vmResource{vbox: mock}
+
+	vm, err := r.vbox.UpdateVM(context.Background(), "00000000-0000-0000-0000-000000000001", vboxmanage.UpdateVMOptions{
+		Name: "renamed-vm",
+	})
+	if err != nil {
+		t.Fatalf("UpdateVM() error = %v", err)
+	}
+	if updatedID != "00000000-0000-0000-0000-000000000001" {
+		t.Fatalf("updatedID = %q, want %q", updatedID, "00000000-0000-0000-0000-000000000001")
+	}
+	if updatedName != "renamed-vm" {
+		t.Fatalf("updatedName = %q, want %q", updatedName, "renamed-vm")
+	}
+	if vm.Name != "renamed-vm" {
+		t.Fatalf("vm.Name = %q, want %q", vm.Name, "renamed-vm")
 	}
 }
 

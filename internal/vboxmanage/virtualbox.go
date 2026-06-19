@@ -10,5 +10,6 @@ type VirtualBox interface {
 	Version(ctx context.Context) (string, error)
 	CreateVM(ctx context.Context, name string, opts CreateVMOptions) (*VM, error)
 	GetVM(ctx context.Context, id string) (*VM, error)
+	UpdateVM(ctx context.Context, id string, opts UpdateVMOptions) (*VM, error)
 	DeleteVM(ctx context.Context, id string) error
 }
