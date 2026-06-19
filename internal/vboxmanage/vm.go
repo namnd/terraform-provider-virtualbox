@@ -11,8 +11,9 @@ import (
 
 // VM holds basic information about a VirtualBox virtual machine.
 type VM struct {
-	Name string
-	UUID string
+	Name   string
+	UUID   string
+	OSType string
 }
 
 // CreateVMOptions configures optional arguments for CreateVM.

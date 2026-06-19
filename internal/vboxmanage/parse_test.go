@@ -44,7 +44,7 @@ func TestParseShowVMInfoOutput(t *testing.T) {
 	stdout := `name="my-vm"
 encryption="disabled"
 groups="/"
-ostype="Linux_64"
+ostype="Other Linux (64-bit)"
 UUID="9f69463b-2426-49be-8ad2-cb609e20953b"
 CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 `
@@ -59,6 +59,9 @@ CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 	}
 	if vm.UUID != "9f69463b-2426-49be-8ad2-cb609e20953b" {
 		t.Fatalf("UUID = %q, want expected UUID", vm.UUID)
+	}
+	if vm.OSType != "Linux_64" {
+		t.Fatalf("OSType = %q, want %q", vm.OSType, "Linux_64")
 	}
 }
 

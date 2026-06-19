@@ -11,6 +11,9 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/namnd/terraform-provider-virtualbox/internal/vboxmanage"
 )
@@ -33,6 +36,7 @@ type vmResource struct {
 type vmResourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
+	OSType      types.String `tfsdk:"os_type"`
 	LastUpdated types.String `tfsdk:"last_updated"`
 }
 
@@ -73,6 +77,15 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 				Required:            true,
 				MarkdownDescription: "Name of the virtual machine.",
 			},
+			"os_type": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "VirtualBox guest OS type identifier (for example, `Linux_64`).",
+				Default:             stringdefault.StaticString("Linux_64"),
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
 		},
 	}
 }
@@ -86,8 +99,10 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		return
 	}
 
+	osType := plan.OSType.ValueString()
+
 	vm, err := r.vbox.CreateVM(ctx, plan.Name.ValueString(), vboxmanage.CreateVMOptions{
-		OSType: "Linux_64",
+		OSType: osType,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -132,6 +147,9 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 
 	state.Name = types.StringValue(vm.Name)
 	state.ID = types.StringValue(vm.UUID)
+	if vm.OSType != "" {
+		state.OSType = types.StringValue(vm.OSType)
+	}
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)

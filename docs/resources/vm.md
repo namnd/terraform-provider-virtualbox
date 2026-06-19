@@ -19,6 +19,10 @@ description: |-
 
 - `name` (String) Name of the virtual machine.
 
+### Optional
+
+- `os_type` (String) VirtualBox guest OS type identifier (for example, `Linux_64`).
+
 ### Read-Only
 
 - `id` (String) The ID of this resource.

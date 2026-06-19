@@ -10,9 +10,10 @@ import (
 )
 
 var (
-	reCreateVMUUID        = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
-	reMachineReadableName = regexp.MustCompile(`(?m)^name="(.+)"$`)
-	reMachineReadableUUID = regexp.MustCompile(`(?m)^UUID="(.+)"$`)
+	reCreateVMUUID          = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
+	reMachineReadableName   = regexp.MustCompile(`(?m)^name="(.+)"$`)
+	reMachineReadableUUID   = regexp.MustCompile(`(?m)^UUID="(.+)"$`)
+	reMachineReadableOSType = regexp.MustCompile(`(?m)^ostype="(.+)"$`)
 )
 
 func parseCreateVMOutput(name, stdout string) (*VM, error) {
@@ -35,6 +36,9 @@ func parseShowVMInfoOutput(stdout string) (*VM, error) {
 	}
 	if matches := reMachineReadableUUID.FindStringSubmatch(stdout); len(matches) == 2 {
 		vm.UUID = matches[1]
+	}
+	if matches := reMachineReadableOSType.FindStringSubmatch(stdout); len(matches) == 2 {
+		vm.OSType = NormalizeOSType(matches[1])
 	}
 
 	if vm.Name == "" || vm.UUID == "" {

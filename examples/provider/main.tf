@@ -1,3 +1,4 @@
 resource "virtualbox_vm" "cp" {
-  name = "test"
+  name    = "test"
+  os_type = "Linux_arm64"
 }
