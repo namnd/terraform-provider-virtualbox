@@ -48,6 +48,9 @@ ostype="Other Linux (64-bit)"
 UUID="9f69463b-2426-49be-8ad2-cb609e20953b"
 memory=2048
 cpus=2
+nic1="nat"
+nic2="bridged"
+bridgeadapter2="enp0s3"
 CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 `
 
@@ -70,6 +73,18 @@ CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 	}
 	if vm.CPUs != 2 {
 		t.Fatalf("CPUs = %d, want %d", vm.CPUs, 2)
+	}
+	if len(vm.NetworkAdapters) != 2 {
+		t.Fatalf("len(NetworkAdapters) = %d, want %d", len(vm.NetworkAdapters), 2)
+	}
+	if vm.NetworkAdapters[0].Type != "nat" {
+		t.Fatalf("NetworkAdapters[0].Type = %q, want %q", vm.NetworkAdapters[0].Type, "nat")
+	}
+	if vm.NetworkAdapters[1].Type != "bridged" {
+		t.Fatalf("NetworkAdapters[1].Type = %q, want %q", vm.NetworkAdapters[1].Type, "bridged")
+	}
+	if vm.NetworkAdapters[1].HostInterface != "enp0s3" {
+		t.Fatalf("NetworkAdapters[1].HostInterface = %q, want %q", vm.NetworkAdapters[1].HostInterface, "enp0s3")
 	}
 }
 
@@ -96,6 +111,22 @@ CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 	_, err := parseShowVMInfoOutput(stdout)
 	if err == nil {
 		t.Fatal("expected error for missing UUID, got nil")
+	}
+}
+
+func TestParsePromiscuousModes(t *testing.T) {
+	t.Parallel()
+
+	stdout := `NIC 1:                       MAC: 080027EEA5E7, Attachment: NAT, Cable connected: on, Trace: off (file: none), Type: 82540EM, Reported speed: 0 Mbps, Boot priority: 0, Promisc Policy: allow-vms, Bandwidth group: none
+NIC 2:                       MAC: 08002741A4F8, Attachment: Bridged, Cable connected: on, Trace: off (file: none), Type: 82540EM, Reported speed: 0 Mbps, Boot priority: 0, Promisc Policy: allow-all, Bandwidth group: none
+`
+
+	modes := parsePromiscuousModes(stdout)
+	if modes[1] != "allow-vms" {
+		t.Fatalf("modes[1] = %q, want %q", modes[1], "allow-vms")
+	}
+	if modes[2] != "allow-all" {
+		t.Fatalf("modes[2] = %q, want %q", modes[2], "allow-all")
 	}
 }
 

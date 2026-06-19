@@ -12,21 +12,23 @@ import (
 
 // VM holds basic information about a VirtualBox virtual machine.
 type VM struct {
-	Name   string
-	UUID   string
-	OSType string
-	CPUs   int
-	Memory int
+	Name            string
+	UUID            string
+	OSType          string
+	CPUs            int
+	Memory          int
+	NetworkAdapters []NetworkAdapter
 }
 
 // CreateVMOptions configures optional arguments for CreateVM.
 type CreateVMOptions struct {
-	BaseFolder string
-	OSType     string
-	UUID       string
-	Groups     string
-	CPUs       int
-	Memory     int
+	BaseFolder      string
+	OSType          string
+	UUID            string
+	Groups          string
+	CPUs            int
+	Memory          int
+	NetworkAdapters []NetworkAdapter
 }
 
 // CreateVM creates and registers a new virtual machine.
@@ -70,6 +72,12 @@ func (c *Client) CreateVM(ctx context.Context, name string, opts CreateVMOptions
 		return nil, err
 	}
 
+	if len(opts.NetworkAdapters) > 0 {
+		if err := c.applyNetworkAdapters(ctx, vm.UUID, opts.NetworkAdapters); err != nil {
+			return nil, err
+		}
+	}
+
 	return c.GetVM(ctx, vm.UUID)
 }
 
@@ -89,20 +97,31 @@ func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
 		return nil, err
 	}
 
-	return parseShowVMInfoOutput(stdout)
+	vm, err := parseShowVMInfoOutput(stdout)
+	if err != nil {
+		return nil, err
+	}
+
+	humanStdout, _, humanErr := c.RunWithOutput(ctx, "showvminfo", id)
+	if humanErr == nil {
+		applyPromiscuousModes(vm, humanStdout)
+	}
+
+	return vm, nil
 }
 
 // UpdateVMOptions configures mutable settings for UpdateVM.
 // Only non-nil fields are applied.
 type UpdateVMOptions struct {
-	Name   *string
-	CPUs   *int
-	Memory *int
+	Name            *string
+	CPUs            *int
+	Memory          *int
+	NetworkAdapters *[]NetworkAdapter
 }
 
 // HasChanges reports whether any mutable setting is set.
 func (opts UpdateVMOptions) HasChanges() bool {
-	return opts.Name != nil || opts.CPUs != nil || opts.Memory != nil
+	return opts.Name != nil || opts.CPUs != nil || opts.Memory != nil || opts.NetworkAdapters != nil
 }
 
 // UpdateVM updates settings on a registered virtual machine.
@@ -119,6 +138,12 @@ func (c *Client) UpdateVM(ctx context.Context, id string, opts UpdateVMOptions) 
 
 	if err := c.applyVMSettings(ctx, id, opts); err != nil {
 		return nil, err
+	}
+
+	if opts.NetworkAdapters != nil {
+		if err := c.applyNetworkAdapters(ctx, id, *opts.NetworkAdapters); err != nil {
+			return nil, err
+		}
 	}
 
 	return c.GetVM(ctx, id)

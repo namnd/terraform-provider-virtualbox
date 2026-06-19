@@ -4,4 +4,10 @@ resource "virtualbox_vm" "cp" {
 
   cpus   = 4
   memory = 4096
+
+  network_adapter {
+    type             = "bridged"
+    host_interface   = "wlp3s0"
+    promiscuous_mode = "allow-all"
+  }
 }

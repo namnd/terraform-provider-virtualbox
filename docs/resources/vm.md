@@ -23,9 +23,21 @@ description: |-
 
 - `cpus` (Number) Number of virtual CPUs.
 - `memory` (Number) Memory in megabytes.
+- `network_adapter` (Block List) Network adapter configuration. (see [below for nested schema](#nestedblock--network_adapter))
 - `os_type` (String) VirtualBox guest OS type identifier (for example, `Linux_64`).
 
 ### Read-Only
 
 - `id` (String) The ID of this resource.
 - `last_updated` (String)
+
+<a id="nestedblock--network_adapter"></a>
+### Nested Schema for `network_adapter`
+
+Required:
+
+- `type` (String) Adapter type. Must be one of: `nat`, `bridged`.
+
+Optional:
+
+- `host_interface` (String) Host network interface name. Required when `type` is `bridged`.
