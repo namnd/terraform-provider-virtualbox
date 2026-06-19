@@ -1,64 +1,149 @@
-# Terraform Provider Scaffolding (Terraform Plugin Framework)
+# Terraform Provider for VirtualBox
 
-_This template repository is built on the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework). The template repository built on the [Terraform Plugin SDK](https://github.com/hashicorp/terraform-plugin-sdk) can be found at [terraform-provider-scaffolding](https://github.com/hashicorp/terraform-provider-scaffolding). See [Which SDK Should I Use?](https://developer.hashicorp.com/terraform/plugin/framework-benefits) in the Terraform documentation for additional information._
+> **Note:** This is a simple provider created for my personal usage, with help from Grok Build. Pull requests and issues are welcome, but approval and fixes are not guaranteed. **Use at your own risk.**
 
-This repository is a *template* for a [Terraform](https://www.terraform.io) provider. It is intended as a starting point for creating Terraform providers, containing:
+A [Terraform](https://www.terraform.io) provider for managing [Oracle VirtualBox](https://www.virtualbox.org/) virtual machines via the `VBoxManage` CLI. Built with the [Terraform Plugin Framework](https://github.com/hashicorp/terraform-plugin-framework).
 
-- A resource and a data source (`internal/provider/`),
-- Examples (`examples/`) and generated documentation (`docs/`),
-- Miscellaneous meta files.
+## Features
 
-These files contain boilerplate code that you will need to edit to create your own Terraform provider. Tutorials for creating Terraform providers can be found on the [HashiCorp Developer](https://developer.hashicorp.com/terraform/tutorials/providers-plugin-framework) platform. _Terraform Plugin Framework specific guides are titled accordingly._
+- Create and manage virtual machines (`virtualbox_vm`)
+- Create disk image files (`virtualbox_disk`)
+- Attach storage controllers and media to VMs (`virtualbox_vm_storage`)
 
-Please see the [GitHub template repository documentation](https://help.github.com/en/github/creating-cloning-and-archiving-repositories/creating-a-repository-from-a-template) for how to create a new repository from this template on GitHub.
-
-Once you've written your provider, you'll want to [publish it on the Terraform Registry](https://developer.hashicorp.com/terraform/registry/providers/publishing) so that others can use it.
+The provider has no configuration block attributes. It expects `VBoxManage` to be installed and available on `PATH`.
 
 ## Requirements
 
 - [Terraform](https://developer.hashicorp.com/terraform/downloads) >= 1.0
-- [Go](https://golang.org/doc/install) >= 1.24
+- [Go](https://go.dev/doc/install) >= 1.25 (for building from source)
+- [VirtualBox](https://www.virtualbox.org/) with `VBoxManage` on `PATH`
 
-## Building the Provider
+## Using the Provider
 
-1. Clone the repository
-1. Enter the repository directory
-1. Build the provider using the Go `install` command:
+```hcl
+terraform {
+  required_providers {
+    virtualbox = {
+      source = "registry.terraform.io/namnd/virtualbox"
+    }
+  }
+}
+
+provider "virtualbox" {}
+```
+
+### Example
+
+The following configuration creates a VM, an ISO attachment on an IDE controller, a VDI disk, and a bootable SATA controller with the disk attached:
+
+```hcl
+resource "virtualbox_vm" "example" {
+  name    = "example-vm"
+  os_type = "Linux_64"
+  cpus    = 2
+  memory  = 2048
+
+  network_adapter {
+    type             = "bridged"
+    host_interface   = "eth0"
+    promiscuous_mode = "allow-all"
+  }
+}
+
+resource "virtualbox_vm_storage" "iso" {
+  vm_id = virtualbox_vm.example.id
+
+  name          = "IDE Controller"
+  type          = "ide"
+  controller    = "PIIX4"
+  host_io_cache = true
+
+  storage_attachment {
+    port   = 1
+    device = 0
+    type   = "dvddrive"
+    medium = "/path/to/installer.iso"
+  }
+}
+
+resource "virtualbox_disk" "example" {
+  file_path = "/data/example.vdi"
+  size      = 20480
+  format    = "VDI"
+}
+
+resource "virtualbox_vm_storage" "hdd" {
+  vm_id = virtualbox_vm.example.id
+
+  name       = "SATA Controller"
+  type       = "sata"
+  controller = "IntelAHCI"
+  port_count = 1
+  bootable   = true
+
+  storage_attachment {
+    port   = 0
+    device = 0
+    type   = "hdd"
+    medium = virtualbox_disk.example.file_path
+  }
+
+  depends_on = [
+    virtualbox_disk.example,
+    virtualbox_vm_storage.iso,
+  ]
+}
+```
+
+A runnable integration example is in [`examples/provider/`](examples/provider/). Per-resource documentation examples live under [`examples/resources/`](examples/resources/).
+
+## Resources
+
+| Resource | Description |
+| --- | --- |
+| [`virtualbox_vm`](docs/resources/vm.md) | Virtual machine with CPU, memory, OS type, and network adapters (`nat` or `bridged`). |
+| [`virtualbox_disk`](docs/resources/disk.md) | Disk image file (`VDI`, `VMDK`, or `VHD`). Supports import by disk UUID. |
+| [`virtualbox_vm_storage`](docs/resources/vm_storage.md) | One storage controller with one nested `storage_attachment` block. Supports `ide` and `sata` buses. The target VM is powered off automatically before changes are applied. |
+
+There are currently no data sources, functions, or provider-level configuration options.
+
+### Resource notes
+
+- **`virtualbox_vm_storage`** models a single controller and a single attachment as one Terraform resource. Use multiple `virtualbox_vm_storage` resources (with `depends_on` where needed) to attach both an ISO and a hard disk.
+- Changing `vm_id`, controller `name`, `type`, `controller`, `port_count`, `host_io_cache`, `bootable`, or attachment `port`/`device` on `virtualbox_vm_storage` forces replacement.
+- Changing `file_path`, `format`, or `variant` on `virtualbox_disk` forces replacement.
+- Changing `os_type` on `virtualbox_vm` forces replacement.
+
+## Documentation
+
+Provider and resource reference documentation is generated into [`docs/`](docs/) with [terraform-plugin-docs](https://github.com/hashicorp/terraform-plugin-docs):
+
+```shell
+make generate
+```
+
+## Developing the Provider
+
+Clone the repository and install the provider binary locally:
 
 ```shell
 go install
 ```
 
-## Adding Dependencies
+To use a locally built provider, configure a [development overrides file](https://developer.hashicorp.com/terraform/cli/config/config-file#development-overrides-for-provider-developers) pointing at your `$GOPATH/bin` (or `$GOBIN`) directory.
 
-This provider uses [Go modules](https://github.com/golang/go/wiki/Modules).
-Please see the Go documentation for the most up to date information about using Go modules.
-
-To add a new dependency `github.com/author/dependency` to your Terraform provider:
+Common tasks:
 
 ```shell
-go get github.com/author/dependency
-go mod tidy
+make build      # compile
+make test       # unit tests
+make lint       # golangci-lint
+make generate   # regenerate docs from examples
+make testacc    # acceptance tests (requires VirtualBox)
 ```
 
-Then commit the changes to `go.mod` and `go.sum`.
+Acceptance tests create and destroy real VirtualBox resources on the host where they run.
 
-## Using the Provider
+## License
 
-Fill this in for each provider
-
-## Developing the Provider
-
-If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (see [Requirements](#requirements) above).
-
-To compile the provider, run `go install`. This will build the provider and put the provider binary in the `$GOPATH/bin` directory.
-
-To generate or update documentation, run `make generate`.
-
-In order to run the full suite of Acceptance tests, run `make testacc`.
-
-*Note:* Acceptance tests create real resources, and often cost money to run.
-
-```shell
-make testacc
-```
+[MPL-2.0](LICENSE)
