@@ -28,6 +28,9 @@ type mockVirtualBox struct {
 	getVMStorageFn      func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error)
 	getVMStorageRetryFn func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error)
 	getVMIPFn           func(ctx context.Context, id string, opts vboxmanage.GetVMIPOptions) (*vboxmanage.VMIP, error)
+	getVMStateFn        func(ctx context.Context, id string) (string, error)
+	setVMStateFn        func(ctx context.Context, id string, desired string, opts vboxmanage.SetVMStateOptions) error
+	rebootVMFn          func(ctx context.Context, id string) error
 }
 
 func (m *mockVirtualBox) Version(ctx context.Context) (string, error) {
@@ -189,6 +192,27 @@ func (m *mockVirtualBox) GetVMIP(ctx context.Context, id string, opts vboxmanage
 		IPAddress:  "192.168.56.101",
 		MACAddress: "08:00:27:EE:A5:E7",
 	}, nil
+}
+
+func (m *mockVirtualBox) GetVMState(ctx context.Context, id string) (string, error) {
+	if m.getVMStateFn != nil {
+		return m.getVMStateFn(ctx, id)
+	}
+	return vboxmanage.DesiredVMStatePowerOff, nil
+}
+
+func (m *mockVirtualBox) SetVMState(ctx context.Context, id string, desired string, opts vboxmanage.SetVMStateOptions) error {
+	if m.setVMStateFn != nil {
+		return m.setVMStateFn(ctx, id, desired, opts)
+	}
+	return nil
+}
+
+func (m *mockVirtualBox) RebootVM(ctx context.Context, id string) error {
+	if m.rebootVMFn != nil {
+		return m.rebootVMFn(ctx, id)
+	}
+	return nil
 }
 
 func TestVMResourceConfigureAcceptsVirtualBox(t *testing.T) {

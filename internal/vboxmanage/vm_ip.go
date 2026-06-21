@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	vmStartPollInterval      = 500 * time.Millisecond
-	vmStartMaxAttempts       = 120
 	vmIPLookupPollInterval   = 2 * time.Second
 	vmIPLookupDefaultTimeout = 60 * time.Second
 )
@@ -42,89 +40,10 @@ func DefaultVMIPLookupTimeout() time.Duration {
 	return vmIPLookupDefaultTimeout
 }
 
-func isVMRunning(state string) bool {
-	return state == "running"
-}
-
-func isVMStartable(state string) bool {
-	switch state {
-	case "poweroff", "aborted", "saved":
-		return true
-	default:
-		return false
-	}
-}
-
-func isVMStartTransientError(stderr string, err error) bool {
-	if vmErr := classifyVMError(stderr); vmErr != nil && errors.Is(vmErr, ErrVMLocked) {
-		return true
-	}
-
-	var cmdErr *CommandError
-	if errors.As(err, &cmdErr) {
-		return isVMTransientError(cmdErr)
-	}
-
-	return isVMTransientError(&CommandError{Stderr: stderr, Err: err})
-}
-
 // startVMHeadless starts a powered-off virtual machine in headless mode and waits until it is running.
 // It reports whether the VM was started by this call. Already-running VMs are left untouched.
 func (c *Client) startVMHeadless(ctx context.Context, id string) (started bool, err error) {
-	issuedStart := false
-
-	for range vmStartMaxAttempts {
-		state, err := c.vmState(ctx, id)
-		if err != nil {
-			if isVMTransientError(err) {
-				if waitErr := c.waitForStart(ctx); waitErr != nil {
-					return false, waitErr
-				}
-				continue
-			}
-			return false, fmt.Errorf("read virtual machine state: %w", err)
-		}
-
-		if state == "running" {
-			return issuedStart, nil
-		}
-
-		if isVMStartable(state) && (!issuedStart || state == "aborted") {
-			if err := c.waitForVMWriteAccess(ctx, id); err != nil && !isVMTransientError(err) {
-				return false, fmt.Errorf("wait for virtual machine session: %w", err)
-			}
-
-			_, stderr, err := c.RunWithOutput(ctx, "startvm", id, "--type", "headless")
-			if err != nil {
-				if isVMStartTransientError(stderr, err) {
-					if waitErr := c.waitForStart(ctx); waitErr != nil {
-						return false, waitErr
-					}
-					continue
-				}
-				if vmErr := classifyVMError(stderr); vmErr != nil {
-					return false, vmErr
-				}
-				return false, err
-			}
-			issuedStart = true
-		}
-
-		if waitErr := c.waitForStart(ctx); waitErr != nil {
-			return false, waitErr
-		}
-	}
-
-	return false, fmt.Errorf("timed out waiting for virtual machine %q to start", id)
-}
-
-func (c *Client) waitForStart(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(vmStartPollInterval):
-		return nil
-	}
+	return c.startVMUntilRunning(ctx, id, VMStartTypeHeadless)
 }
 
 // GetVMIP starts the VM headless when needed, resolves the adapter MAC address, and looks up its IP via ARP.

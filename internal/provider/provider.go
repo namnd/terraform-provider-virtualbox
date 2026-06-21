@@ -83,6 +83,7 @@ func (p *VirtualboxProvider) Resources(ctx context.Context) []func() resource.Re
 		NewVMResource,
 		NewDiskResource,
 		NewVMStorageResource,
+		NewVMStateResource,
 	}
 }
 

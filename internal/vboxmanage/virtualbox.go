@@ -23,4 +23,7 @@ type VirtualBox interface {
 	DeleteVMStorage(ctx context.Context, vmID string, ctl StorageCtl) error
 	AttachStorage(ctx context.Context, vmID, controllerName string, attach StorageAttach) error
 	GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*VMIP, error)
+	GetVMState(ctx context.Context, id string) (string, error)
+	SetVMState(ctx context.Context, id string, desired string, opts SetVMStateOptions) error
+	RebootVM(ctx context.Context, id string) error
 }

@@ -22,7 +22,7 @@ resource "virtualbox_vm" "example" {
 
 # Starts the VM headless only when it is not already running, polls ARP for the IP, then powers the VM off on success.
 data "virtualbox_vm_ip" "example" {
-  id = virtualbox_vm.example.id
+  vm_id = virtualbox_vm.example.id
 
   # Optional: resolve IP from a specific network adapter (defaults to 0).
   # network_adapter = 0
