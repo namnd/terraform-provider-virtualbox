@@ -55,6 +55,25 @@ func TestClassifyStorageError(t *testing.T) {
 	}
 }
 
+func TestIsVMTransientError(t *testing.T) {
+	t.Parallel()
+
+	if !isVMTransientError(ErrVMLocked) {
+		t.Fatal("expected ErrVMLocked to be transient")
+	}
+
+	cmdErr := &CommandError{
+		Stderr: "VBoxManage: error: The object is not ready\nVBoxManage: error: Details: code E_ACCESSDENIED (0x80070005)",
+	}
+	if !isVMTransientError(cmdErr) {
+		t.Fatal("expected object is not ready error to be transient")
+	}
+
+	if isVMTransientError(errors.New("boom")) {
+		t.Fatal("expected generic error to not be transient")
+	}
+}
+
 func TestIsBenignStorageDeleteError(t *testing.T) {
 	t.Parallel()
 

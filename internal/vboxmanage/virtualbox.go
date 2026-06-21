@@ -19,6 +19,8 @@ type VirtualBox interface {
 	DeleteDisk(ctx context.Context, id string) error
 	CreateVMStorage(ctx context.Context, vmID string, ctl StorageCtl) error
 	GetVMStorage(ctx context.Context, vmID, controllerName string, port, device int) (*StorageCtl, error)
+	GetVMStorageRetry(ctx context.Context, vmID, controllerName string, port, device int) (*StorageCtl, error)
 	DeleteVMStorage(ctx context.Context, vmID string, ctl StorageCtl) error
 	AttachStorage(ctx context.Context, vmID, controllerName string, attach StorageAttach) error
+	GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*VMIP, error)
 }

@@ -55,7 +55,7 @@ func (c *Client) ensureVMPoweredOff(ctx context.Context, id string) error {
 	}
 
 	if isVMPoweredOff(state) {
-		return c.waitForVMWriteAccess(ctx)
+		return c.waitForVMWriteAccess(ctx, id)
 	}
 
 	if state == "saved" {
@@ -67,7 +67,7 @@ func (c *Client) ensureVMPoweredOff(ctx context.Context, id string) error {
 	for range vmPowerOffMaxAttempts {
 		state, err = c.vmState(ctx, id)
 		if err == nil && isVMPoweredOff(state) {
-			return c.waitForVMWriteAccess(ctx)
+			return c.waitForVMWriteAccess(ctx, id)
 		}
 
 		select {
@@ -80,13 +80,36 @@ func (c *Client) ensureVMPoweredOff(ctx context.Context, id string) error {
 	return fmt.Errorf("timed out waiting for virtual machine %q to power off", id)
 }
 
-func (c *Client) waitForVMWriteAccess(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(vmWriteAccessSettle):
-		return nil
+func (c *Client) waitForVMWriteAccess(ctx context.Context, id string) error {
+	var lastErr error
+	for attempt := range vmWriteLockMaxAttempts {
+		_, stderr, err := c.RunWithOutput(ctx, "showvminfo", id, "--machinereadable")
+		if err == nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(vmWriteAccessSettle):
+				return nil
+			}
+		}
+
+		cmdErr := &CommandError{Stderr: stderr, Err: err}
+		if !isVMTransientError(cmdErr) {
+			if vmErr := classifyVMError(stderr); vmErr != nil {
+				return vmErr
+			}
+			return err
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * vmWriteLockRetryBase):
+		}
 	}
+
+	return lastErr
 }
 
 func classifyCommandError(stderr string, err error) error {

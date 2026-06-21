@@ -220,7 +220,7 @@ func (r *vmStorageResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	vmID := state.VMID.ValueString()
 	attach := state.StorageAttachment
-	storage, err := r.vbox.GetVMStorage(ctx, vmID, state.Name.ValueString(), int(attach.Port.ValueInt64()), int(attach.Device.ValueInt64()))
+	storage, err := r.vbox.GetVMStorageRetry(ctx, vmID, state.Name.ValueString(), int(attach.Port.ValueInt64()), int(attach.Device.ValueInt64()))
 	if err != nil {
 		if errors.Is(err, vboxmanage.ErrVMNotFound) || errors.Is(err, vboxmanage.ErrVMStorageNotFound) {
 			resp.State.RemoveResource(ctx)

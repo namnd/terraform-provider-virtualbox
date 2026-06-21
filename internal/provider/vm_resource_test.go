@@ -13,19 +13,21 @@ import (
 )
 
 type mockVirtualBox struct {
-	versionFn         func(ctx context.Context) (string, error)
-	createVMFn        func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
-	getVMFn           func(ctx context.Context, id string) (*vboxmanage.VM, error)
-	updateVMFn        func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
-	deleteVMFn        func(ctx context.Context, id string) error
-	createDiskFn      func(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error)
-	getDiskFn         func(ctx context.Context, id string) (*vboxmanage.Disk, error)
-	updateDiskFn      func(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error)
-	deleteDiskFn      func(ctx context.Context, id string) error
-	createVMStorageFn func(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error
-	deleteVMStorageFn func(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error
-	attachStorageFn   func(ctx context.Context, vmID, controllerName string, attach vboxmanage.StorageAttach) error
-	getVMStorageFn    func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error)
+	versionFn           func(ctx context.Context) (string, error)
+	createVMFn          func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
+	getVMFn             func(ctx context.Context, id string) (*vboxmanage.VM, error)
+	updateVMFn          func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
+	deleteVMFn          func(ctx context.Context, id string) error
+	createDiskFn        func(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error)
+	getDiskFn           func(ctx context.Context, id string) (*vboxmanage.Disk, error)
+	updateDiskFn        func(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error)
+	deleteDiskFn        func(ctx context.Context, id string) error
+	createVMStorageFn   func(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error
+	deleteVMStorageFn   func(ctx context.Context, vmID string, ctl vboxmanage.StorageCtl) error
+	attachStorageFn     func(ctx context.Context, vmID, controllerName string, attach vboxmanage.StorageAttach) error
+	getVMStorageFn      func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error)
+	getVMStorageRetryFn func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error)
+	getVMIPFn           func(ctx context.Context, id string, opts vboxmanage.GetVMIPOptions) (*vboxmanage.VMIP, error)
 }
 
 func (m *mockVirtualBox) Version(ctx context.Context) (string, error) {
@@ -152,6 +154,17 @@ func (m *mockVirtualBox) GetVMStorage(ctx context.Context, vmID, controllerName 
 	if m.getVMStorageFn != nil {
 		return m.getVMStorageFn(ctx, vmID, controllerName, port, device)
 	}
+	return m.getVMStorageDefault(controllerName, port, device), nil
+}
+
+func (m *mockVirtualBox) GetVMStorageRetry(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageCtl, error) {
+	if m.getVMStorageRetryFn != nil {
+		return m.getVMStorageRetryFn(ctx, vmID, controllerName, port, device)
+	}
+	return m.GetVMStorage(ctx, vmID, controllerName, port, device)
+}
+
+func (m *mockVirtualBox) getVMStorageDefault(controllerName string, port, device int) *vboxmanage.StorageCtl {
 	return &vboxmanage.StorageCtl{
 		Name:        controllerName,
 		Type:        vboxmanage.StorageTypeIDE,
@@ -165,6 +178,16 @@ func (m *mockVirtualBox) GetVMStorage(ctx context.Context, vmID, controllerName 
 			Type:   vboxmanage.StorageAttachTypeDVDDrive,
 			Medium: "/path/to/metal-amd64.iso",
 		},
+	}
+}
+
+func (m *mockVirtualBox) GetVMIP(ctx context.Context, id string, opts vboxmanage.GetVMIPOptions) (*vboxmanage.VMIP, error) {
+	if m.getVMIPFn != nil {
+		return m.getVMIPFn(ctx, id, opts)
+	}
+	return &vboxmanage.VMIP{
+		IPAddress:  "192.168.56.101",
+		MACAddress: "08:00:27:EE:A5:E7",
 	}, nil
 }
 

@@ -109,6 +109,10 @@ func isBenignStorageDeleteError(err error) bool {
 }
 
 func isVMTransientError(err error) bool {
+	if errors.Is(err, ErrVMLocked) {
+		return true
+	}
+
 	var cmdErr *CommandError
 	if !errors.As(err, &cmdErr) {
 		return false

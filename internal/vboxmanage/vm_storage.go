@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ErrVMStorageNotFound is returned when a VM storage controller attachment cannot be found.
@@ -93,6 +94,29 @@ func (c *Client) GetVMStorage(ctx context.Context, vmID, controllerName string, 
 	}
 
 	return parseVMStorageMachineReadable(stdout, controllerName, port, device)
+}
+
+// GetVMStorageRetry returns VM storage information, retrying transient VirtualBox session errors.
+func (c *Client) GetVMStorageRetry(ctx context.Context, vmID, controllerName string, port, device int) (*StorageCtl, error) {
+	var lastErr error
+	for attempt := range 10 {
+		storage, err := c.GetVMStorage(ctx, vmID, controllerName, port, device)
+		if err == nil {
+			return storage, nil
+		}
+		if !isVMTransientError(err) {
+			return nil, err
+		}
+		lastErr = err
+
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 300 * time.Millisecond):
+		}
+	}
+
+	return nil, lastErr
 }
 
 func parseVMStorageMachineReadable(stdout, controllerName string, port, device int) (*StorageCtl, error) {

@@ -91,7 +91,9 @@ func (p *VirtualboxProvider) EphemeralResources(ctx context.Context) []func() ep
 }
 
 func (p *VirtualboxProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{}
+	return []func() datasource.DataSource{
+		NewVMIPDataSource,
+	}
 }
 
 func (p *VirtualboxProvider) Functions(ctx context.Context) []func() function.Function {
