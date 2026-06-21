@@ -55,7 +55,7 @@ func (c *Client) GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*
 		return nil, errors.New("virtual machine id must not be empty")
 	}
 
-	vm, err := c.GetVM(ctx, id)
+	vm, err := c.GetVMRetry(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -83,9 +83,9 @@ func (c *Client) GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*
 	var arpDeadline time.Time
 
 	for {
-		state, err := c.vmState(ctx, id)
+		state, err := c.vmStateRetry(ctx, id)
 		if err != nil {
-			return nil, fmt.Errorf("read virtual machine state: %w", err)
+			return nil, err
 		}
 
 		if !isVMRunning(state) {

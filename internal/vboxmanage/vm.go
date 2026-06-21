@@ -8,7 +8,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // VM holds basic information about a VirtualBox virtual machine.
@@ -114,7 +113,7 @@ func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
 // GetVMRetry returns VM information, retrying transient VirtualBox session errors.
 func (c *Client) GetVMRetry(ctx context.Context, id string) (*VM, error) {
 	var lastErr error
-	for attempt := range 10 {
+	for range vmStartMaxAttempts {
 		vm, err := c.GetVM(ctx, id)
 		if err == nil {
 			return vm, nil
@@ -124,10 +123,8 @@ func (c *Client) GetVMRetry(ctx context.Context, id string) (*VM, error) {
 		}
 		lastErr = err
 
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(time.Duration(attempt+1) * 300 * time.Millisecond):
+		if waitErr := c.waitForStart(ctx); waitErr != nil {
+			return nil, waitErr
 		}
 	}
 

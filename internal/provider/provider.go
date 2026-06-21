@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -29,6 +30,8 @@ type VirtualboxProvider struct {
 	// provider is built and ran locally, and "test" when running acceptance
 	// testing.
 	version string
+	vbox    vboxmanage.VirtualBox
+	vboxMu  sync.Mutex
 }
 
 // VirtualboxProviderModel describes the provider data model.
@@ -55,27 +58,35 @@ func (p *VirtualboxProvider) Configure(ctx context.Context, req provider.Configu
 		return
 	}
 
-	client, err := vboxmanage.New()
+	client, err := p.vboxClient(ctx)
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to create VBoxManage client",
-			fmt.Sprintf("Could not initialize VBoxManage client: %s", err),
-		)
-	}
-
-	if _, err := client.Version(ctx); err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to connect to VirtualBox",
-			fmt.Sprintf("Could not verify VBoxManage installation: %s", err),
-		)
-	}
-
-	if resp.Diagnostics.HasError() {
+		resp.Diagnostics.AddError("Unable to connect to VirtualBox", err.Error())
 		return
 	}
 
 	resp.DataSourceData = client
 	resp.ResourceData = client
+}
+
+func (p *VirtualboxProvider) vboxClient(ctx context.Context) (vboxmanage.VirtualBox, error) {
+	p.vboxMu.Lock()
+	defer p.vboxMu.Unlock()
+
+	if p.vbox != nil {
+		return p.vbox, nil
+	}
+
+	client, err := vboxmanage.New()
+	if err != nil {
+		return nil, fmt.Errorf("could not initialize VBoxManage client: %s", err)
+	}
+
+	if _, err := client.Version(ctx); err != nil {
+		return nil, fmt.Errorf("could not verify VBoxManage installation: %s", err)
+	}
+
+	p.vbox = client
+	return p.vbox, nil
 }
 
 func (p *VirtualboxProvider) Resources(ctx context.Context) []func() resource.Resource {
@@ -92,13 +103,15 @@ func (p *VirtualboxProvider) EphemeralResources(ctx context.Context) []func() ep
 }
 
 func (p *VirtualboxProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{
-		NewVMIPDataSource,
-	}
+	return []func() datasource.DataSource{}
 }
 
 func (p *VirtualboxProvider) Functions(ctx context.Context) []func() function.Function {
-	return []func() function.Function{}
+	return []func() function.Function{
+		func() function.Function {
+			return NewVMIPFunction(p)
+		},
+	}
 }
 
 func (p *VirtualboxProvider) Actions(ctx context.Context) []func() action.Action {

@@ -56,27 +56,18 @@ resource "virtualbox_vm_storage" "hdd" {
   ]
 }
 
-data "virtualbox_vm_ip" "example" {
-  vm_id = virtualbox_vm.cp.id
-
-  # Optional: resolve IP from a specific network adapter (defaults to 0).
-  # network_adapter = 0
+locals {
+  vm_ip = provider::virtualbox::vm_ip(
+    virtualbox_vm.cp.id,
+    null,
+    "5m",
+  )
 }
 
 output "vm_ip" {
-  value = data.virtualbox_vm_ip.example.ip_address
+  value = local.vm_ip.ip_address
 }
 
 output "vm_mac" {
-  value = data.virtualbox_vm_ip.example.mac_address
-}
-
-resource "virtualbox_vm_state" "running" {
-  vm_id      = virtualbox_vm.cp.id
-  state      = "running"
-  start_type = "headless"
-
-  depends_on = [
-    data.virtualbox_vm_ip.example,
-  ]
+  value = local.vm_ip.mac_address
 }

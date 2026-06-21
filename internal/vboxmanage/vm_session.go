@@ -160,6 +160,27 @@ func (c *Client) vmState(ctx context.Context, id string) (string, error) {
 	return "", fmt.Errorf("vm state not found in showvminfo output")
 }
 
+// vmStateRetry returns the VM state, retrying transient VirtualBox session errors.
+func (c *Client) vmStateRetry(ctx context.Context, id string) (string, error) {
+	var lastErr error
+	for range vmStartMaxAttempts {
+		state, err := c.vmState(ctx, id)
+		if err == nil {
+			return state, nil
+		}
+		if !isVMTransientError(err) {
+			return "", err
+		}
+		lastErr = err
+
+		if waitErr := c.waitForStart(ctx); waitErr != nil {
+			return "", waitErr
+		}
+	}
+
+	return "", fmt.Errorf("read virtual machine state: %w", lastErr)
+}
+
 func isVMPoweredOff(state string) bool {
 	return state == "poweroff" || state == "aborted"
 }
