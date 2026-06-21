@@ -15,7 +15,7 @@ import (
 
 const (
 	vmStartPollInterval      = 500 * time.Millisecond
-	vmStartMaxAttempts       = 60
+	vmStartMaxAttempts       = 120
 	vmIPLookupPollInterval   = 2 * time.Second
 	vmIPLookupDefaultTimeout = 60 * time.Second
 )
@@ -40,6 +40,10 @@ type GetVMIPOptions struct {
 // DefaultVMIPLookupTimeout returns the default ARP lookup timeout.
 func DefaultVMIPLookupTimeout() time.Duration {
 	return vmIPLookupDefaultTimeout
+}
+
+func isVMRunning(state string) bool {
+	return state == "running"
 }
 
 func isVMStartable(state string) bool {
@@ -85,7 +89,7 @@ func (c *Client) startVMHeadless(ctx context.Context, id string) (started bool, 
 			return issuedStart, nil
 		}
 
-		if isVMStartable(state) && !issuedStart {
+		if isVMStartable(state) && (!issuedStart || state == "aborted") {
 			if err := c.waitForVMWriteAccess(ctx, id); err != nil && !isVMTransientError(err) {
 				return false, fmt.Errorf("wait for virtual machine session: %w", err)
 			}
@@ -157,11 +161,37 @@ func (c *Client) GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*
 		timeout = vmIPLookupDefaultTimeout
 	}
 
-	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	var arpDeadline time.Time
 
 	for {
-		ip, err := lookupIPByMAC(lookupCtx, mac)
+		state, err := c.vmState(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("read virtual machine state: %w", err)
+		}
+
+		if !isVMRunning(state) {
+			restarted, err := c.startVMHeadless(ctx, id)
+			if err != nil {
+				return nil, fmt.Errorf("virtual machine is not running (state %q): %w", state, err)
+			}
+			if restarted {
+				started = true
+			}
+			arpDeadline = time.Time{}
+
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(vmIPLookupPollInterval):
+			}
+			continue
+		}
+
+		if arpDeadline.IsZero() {
+			arpDeadline = time.Now().Add(timeout)
+		}
+
+		ip, err := lookupIPByMAC(ctx, mac)
 		if err == nil {
 			if started {
 				shutdownCtx := context.WithoutCancel(ctx)
@@ -178,9 +208,17 @@ func (c *Client) GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*
 			return nil, fmt.Errorf("lookup ip address for mac %q: %w", mac, err)
 		}
 
+		if time.Now().After(arpDeadline) {
+			return nil, fmt.Errorf(
+				"lookup ip address for mac %q: timed out waiting for arp entry while virtual machine is running: %w",
+				mac,
+				context.DeadlineExceeded,
+			)
+		}
+
 		select {
-		case <-lookupCtx.Done():
-			return nil, fmt.Errorf("lookup ip address for mac %q: timed out waiting for arp entry: %w", mac, lookupCtx.Err())
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case <-time.After(vmIPLookupPollInterval):
 		}
 	}

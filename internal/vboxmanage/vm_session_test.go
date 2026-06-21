@@ -36,8 +36,25 @@ func TestIsVMStartable(t *testing.T) {
 	if !isVMStartable("saved") {
 		t.Fatal("expected saved VM to be startable")
 	}
+	if !isVMStartable("aborted") {
+		t.Fatal("expected aborted VM to be startable")
+	}
 	if isVMStartable("running") {
 		t.Fatal("expected running VM to not be startable")
+	}
+}
+
+func TestIsVMRunning(t *testing.T) {
+	t.Parallel()
+
+	if !isVMRunning("running") {
+		t.Fatal("expected running VM state to be running")
+	}
+	if isVMRunning("poweroff") {
+		t.Fatal("expected powered off VM state to not be running")
+	}
+	if isVMRunning("starting") {
+		t.Fatal("expected starting VM state to not be running")
 	}
 }
 
