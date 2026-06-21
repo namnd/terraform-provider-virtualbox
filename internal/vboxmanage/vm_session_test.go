@@ -27,6 +27,20 @@ func TestIsVMLockError(t *testing.T) {
 	}
 }
 
+func TestIsVMStartable(t *testing.T) {
+	t.Parallel()
+
+	if !isVMStartable("poweroff") {
+		t.Fatal("expected powered off VM to be startable")
+	}
+	if !isVMStartable("saved") {
+		t.Fatal("expected saved VM to be startable")
+	}
+	if isVMStartable("running") {
+		t.Fatal("expected running VM to not be startable")
+	}
+}
+
 func TestVMStateNeedsPowerOff(t *testing.T) {
 	t.Parallel()
 

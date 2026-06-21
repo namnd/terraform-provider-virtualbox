@@ -4,6 +4,8 @@
 package vboxmanage
 
 import (
+	"errors"
+	"os/exec"
 	"testing"
 )
 
@@ -44,8 +46,8 @@ func TestParseIPFromARPOutput(t *testing.T) {
 
 			ip, err := parseIPFromARPOutput(tt.output)
 			if tt.wantErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
+				if !errors.Is(err, errIPNotFoundInARP) {
+					t.Fatalf("parseIPFromARPOutput() error = %v, want %v", err, errIPNotFoundInARP)
 				}
 				return
 			}
@@ -56,6 +58,19 @@ func TestParseIPFromARPOutput(t *testing.T) {
 				t.Fatalf("ip = %q, want %q", ip, tt.wantIP)
 			}
 		})
+	}
+}
+
+func TestIsGrepNoMatch(t *testing.T) {
+	t.Parallel()
+
+	if isGrepNoMatch(nil) {
+		t.Fatal("expected nil error to not be a grep no-match")
+	}
+
+	err := exec.Command("sh", "-c", "grep example /dev/null").Run()
+	if !isGrepNoMatch(err) {
+		t.Fatalf("expected grep exit status 1 to be a no-match, got %v", err)
 	}
 }
 

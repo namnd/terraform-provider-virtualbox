@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/namnd/terraform-provider-virtualbox/internal/vboxmanage"
@@ -51,10 +52,12 @@ func TestVMIPDataSourceReadUsesVirtualBox(t *testing.T) {
 
 	var readID string
 	var adapterIndex int
+	var timeout time.Duration
 	mock := &mockVirtualBox{
 		getVMIPFn: func(_ context.Context, id string, opts vboxmanage.GetVMIPOptions) (*vboxmanage.VMIP, error) {
 			readID = id
 			adapterIndex = opts.NetworkAdapter
+			timeout = opts.Timeout
 			return &vboxmanage.VMIP{
 				IPAddress:  "192.168.56.101",
 				MACAddress: "08:00:27:EE:A5:E7",
@@ -66,6 +69,7 @@ func TestVMIPDataSourceReadUsesVirtualBox(t *testing.T) {
 
 	vmIP, err := d.vbox.GetVMIP(context.Background(), "00000000-0000-0000-0000-000000000001", vboxmanage.GetVMIPOptions{
 		NetworkAdapter: 0,
+		Timeout:        2 * time.Minute,
 	})
 	if err != nil {
 		t.Fatalf("GetVMIP() error = %v", err)
@@ -75,6 +79,9 @@ func TestVMIPDataSourceReadUsesVirtualBox(t *testing.T) {
 	}
 	if adapterIndex != 0 {
 		t.Fatalf("adapterIndex = %d, want %d", adapterIndex, 0)
+	}
+	if timeout != 2*time.Minute {
+		t.Fatalf("timeout = %s, want %s", timeout, 2*time.Minute)
 	}
 	if vmIP.IPAddress != "192.168.56.101" {
 		t.Fatalf("vmIP.IPAddress = %q, want %q", vmIP.IPAddress, "192.168.56.101")

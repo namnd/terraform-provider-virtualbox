@@ -37,6 +37,11 @@ func TestClassifyStorageError(t *testing.T) {
 			want:   ErrVMLocked,
 		},
 		{
+			name:   "vm locked by session",
+			stderr: "VBoxManage: error: The machine 'test-2' is already locked by a session (or being locked or unlocked)",
+			want:   ErrVMLocked,
+		},
+		{
 			name:   "lock request pending",
 			stderr: "VBoxManage: error: The machine 'test-2' already has a lock request pending",
 			want:   ErrVMLocked,
@@ -67,6 +72,13 @@ func TestIsVMTransientError(t *testing.T) {
 	}
 	if !isVMTransientError(cmdErr) {
 		t.Fatal("expected object is not ready error to be transient")
+	}
+
+	startErr := &CommandError{
+		Stderr: "VBoxManage: error: The machine 'test-2' is already locked by a session (or being locked or unlocked)\nVBoxManage: error: Details: code VBOX_E_INVALID_OBJECT_STATE (0x80bb0007)",
+	}
+	if !isVMTransientError(startErr) {
+		t.Fatal("expected startvm lock error to be transient")
 	}
 
 	if isVMTransientError(errors.New("boom")) {

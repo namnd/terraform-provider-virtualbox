@@ -35,12 +35,15 @@ resource "virtualbox_vm" "example" {
   }
 }
 
-# Starts the VM headless, resolves the IP via ARP, then powers the VM off.
+# Starts the VM headless, polls for the IP via ARP until found or timed out, then powers the VM off on success.
 data "virtualbox_vm_ip" "example" {
   id = virtualbox_vm.example.id
 
   # Optional: resolve IP from a specific network adapter (defaults to 0).
   # network_adapter = 0
+
+  # Optional: maximum time to wait for the IP to appear in ARP (defaults to 60s).
+  timeout = "2m"
 }
 
 output "vm_ip" {
@@ -62,6 +65,7 @@ output "vm_mac" {
 ### Optional
 
 - `network_adapter` (Number) Zero-based index of the network adapter to resolve. Defaults to the first adapter.
+- `timeout` (String) Maximum time to wait for the VM IP address to appear in the ARP table. Must be a duration string such as `60s` or `2m`. Defaults to `60s`.
 
 ### Read-Only
 

@@ -6,6 +6,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
@@ -29,6 +30,7 @@ type vmIPDataSourceModel struct {
 	IPAddress      types.String `tfsdk:"ip_address"`
 	MACAddress     types.String `tfsdk:"mac_address"`
 	NetworkAdapter types.Int64  `tfsdk:"network_adapter"`
+	Timeout        types.String `tfsdk:"timeout"`
 }
 
 func (d *vmIPDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -72,6 +74,11 @@ func (d *vmIPDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, r
 				Computed:            true,
 				MarkdownDescription: "Zero-based index of the network adapter to resolve. Defaults to the first adapter.",
 			},
+			"timeout": schema.StringAttribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Maximum time to wait for the VM IP address to appear in the ARP table. Must be a duration string such as `60s` or `2m`. Defaults to `60s`.",
+			},
 		},
 	}
 }
@@ -88,8 +95,33 @@ func (d *vmIPDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 		adapterIndex = config.NetworkAdapter.ValueInt64()
 	}
 
+	const defaultTimeoutValue = "60s"
+
+	timeout := vboxmanage.DefaultVMIPLookupTimeout()
+	timeoutValue := defaultTimeoutValue
+	if !config.Timeout.IsNull() && !config.Timeout.IsUnknown() {
+		timeoutValue = config.Timeout.ValueString()
+		parsed, err := time.ParseDuration(timeoutValue)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				"Invalid timeout value",
+				fmt.Sprintf("Could not parse timeout %q: %s", timeoutValue, err),
+			)
+			return
+		}
+		if parsed <= 0 {
+			resp.Diagnostics.AddError(
+				"Invalid timeout value",
+				"Timeout must be greater than zero.",
+			)
+			return
+		}
+		timeout = parsed
+	}
+
 	vmIP, err := d.vbox.GetVMIP(ctx, config.ID.ValueString(), vboxmanage.GetVMIPOptions{
 		NetworkAdapter: int(adapterIndex),
+		Timeout:        timeout,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -102,6 +134,7 @@ func (d *vmIPDataSource) Read(ctx context.Context, req datasource.ReadRequest, r
 	config.IPAddress = types.StringValue(vmIP.IPAddress)
 	config.MACAddress = types.StringValue(vmIP.MACAddress)
 	config.NetworkAdapter = types.Int64Value(adapterIndex)
+	config.Timeout = types.StringValue(timeoutValue)
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &config)...)
 }

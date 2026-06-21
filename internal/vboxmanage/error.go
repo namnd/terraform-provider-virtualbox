@@ -77,6 +77,8 @@ func classifyVMError(stderr string) error {
 	case strings.Contains(msg, "could not find a registered machine"):
 		return ErrVMNotFound
 	case strings.Contains(msg, "already locked for a session"),
+		strings.Contains(msg, "already locked by a session"),
+		strings.Contains(msg, "being locked or unlocked"),
 		strings.Contains(msg, "lock request pending"):
 		return ErrVMLocked
 	default:
@@ -95,6 +97,8 @@ func classifyStorageError(stderr string) error {
 	case strings.Contains(msg, "could not find a registered machine"):
 		return ErrVMNotFound
 	case strings.Contains(msg, "already locked for a session"),
+		strings.Contains(msg, "already locked by a session"),
+		strings.Contains(msg, "being locked or unlocked"),
 		strings.Contains(msg, "lock request pending"):
 		return ErrVMLocked
 	default:
@@ -122,5 +126,8 @@ func isVMTransientError(err error) bool {
 	return strings.Contains(msg, "object is not ready") ||
 		strings.Contains(msg, "e_accessdenied") ||
 		strings.Contains(msg, "already locked for a session") ||
-		strings.Contains(msg, "lock request pending")
+		strings.Contains(msg, "already locked by a session") ||
+		strings.Contains(msg, "being locked or unlocked") ||
+		strings.Contains(msg, "lock request pending") ||
+		strings.Contains(msg, "vbox_e_invalid_object_state")
 }

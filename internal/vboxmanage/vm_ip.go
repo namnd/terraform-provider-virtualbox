@@ -14,13 +14,16 @@ import (
 )
 
 const (
-	vmStartPollInterval    = 500 * time.Millisecond
-	vmStartMaxAttempts     = 60
-	vmIPLookupPollInterval = 2 * time.Second
-	vmIPLookupMaxAttempts  = 30
+	vmStartPollInterval      = 500 * time.Millisecond
+	vmStartMaxAttempts       = 60
+	vmIPLookupPollInterval   = 2 * time.Second
+	vmIPLookupDefaultTimeout = 60 * time.Second
 )
 
-var reARPAddress = regexp.MustCompile(`\(([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\)`)
+var (
+	reARPAddress       = regexp.MustCompile(`\(([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\)`)
+	errIPNotFoundInARP = errors.New("ip address not found in arp table")
+)
 
 // VMIP holds the resolved IP and MAC address for a VM network adapter.
 type VMIP struct {
@@ -31,45 +34,97 @@ type VMIP struct {
 // GetVMIPOptions configures GetVMIP.
 type GetVMIPOptions struct {
 	NetworkAdapter int
+	Timeout        time.Duration
+}
+
+// DefaultVMIPLookupTimeout returns the default ARP lookup timeout.
+func DefaultVMIPLookupTimeout() time.Duration {
+	return vmIPLookupDefaultTimeout
+}
+
+func isVMStartable(state string) bool {
+	switch state {
+	case "poweroff", "aborted", "saved":
+		return true
+	default:
+		return false
+	}
+}
+
+func isVMStartTransientError(stderr string, err error) bool {
+	if vmErr := classifyVMError(stderr); vmErr != nil && errors.Is(vmErr, ErrVMLocked) {
+		return true
+	}
+
+	var cmdErr *CommandError
+	if errors.As(err, &cmdErr) {
+		return isVMTransientError(cmdErr)
+	}
+
+	return isVMTransientError(&CommandError{Stderr: stderr, Err: err})
 }
 
 // startVMHeadless starts a powered-off virtual machine in headless mode and waits until it is running.
 // It reports whether the VM was started by this call. Already-running VMs are left untouched.
 func (c *Client) startVMHeadless(ctx context.Context, id string) (started bool, err error) {
-	state, err := c.vmState(ctx, id)
-	if err != nil {
-		return false, fmt.Errorf("read virtual machine state: %w", err)
-	}
-	if state == "running" {
-		return false, nil
-	}
-
-	_, stderr, err := c.RunWithOutput(ctx, "startvm", id, "--type", "headless")
-	if err != nil {
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return false, vmErr
-		}
-		return false, err
-	}
+	issuedStart := false
 
 	for range vmStartMaxAttempts {
-		state, err = c.vmState(ctx, id)
-		if err == nil && state == "running" {
-			return true, nil
+		state, err := c.vmState(ctx, id)
+		if err != nil {
+			if isVMTransientError(err) {
+				if waitErr := c.waitForStart(ctx); waitErr != nil {
+					return false, waitErr
+				}
+				continue
+			}
+			return false, fmt.Errorf("read virtual machine state: %w", err)
 		}
 
-		select {
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case <-time.After(vmStartPollInterval):
+		if state == "running" {
+			return issuedStart, nil
+		}
+
+		if isVMStartable(state) && !issuedStart {
+			if err := c.waitForVMWriteAccess(ctx, id); err != nil && !isVMTransientError(err) {
+				return false, fmt.Errorf("wait for virtual machine session: %w", err)
+			}
+
+			_, stderr, err := c.RunWithOutput(ctx, "startvm", id, "--type", "headless")
+			if err != nil {
+				if isVMStartTransientError(stderr, err) {
+					if waitErr := c.waitForStart(ctx); waitErr != nil {
+						return false, waitErr
+					}
+					continue
+				}
+				if vmErr := classifyVMError(stderr); vmErr != nil {
+					return false, vmErr
+				}
+				return false, err
+			}
+			issuedStart = true
+		}
+
+		if waitErr := c.waitForStart(ctx); waitErr != nil {
+			return false, waitErr
 		}
 	}
 
 	return false, fmt.Errorf("timed out waiting for virtual machine %q to start", id)
 }
 
-// GetVMIP starts the VM headless when needed, resolves the adapter MAC address, looks up its IP via ARP,
-// and powers the VM off when it was started for this lookup.
+func (c *Client) waitForStart(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(vmStartPollInterval):
+		return nil
+	}
+}
+
+// GetVMIP starts the VM headless when needed, resolves the adapter MAC address, and looks up its IP via ARP.
+// The VM is powered off only after the IP is resolved successfully and only when this call started the VM.
 // The id argument may be either the VM name or UUID.
 func (c *Client) GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*VMIP, error) {
 	id = strings.TrimSpace(id)
@@ -97,42 +152,38 @@ func (c *Client) GetVMIP(ctx context.Context, id string, opts GetVMIPOptions) (*
 		return nil, fmt.Errorf("start virtual machine: %w", err)
 	}
 
-	var lastErr error
-	var vmIP *VMIP
-	for range vmIPLookupMaxAttempts {
-		ip, err := lookupIPByMAC(ctx, mac)
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = vmIPLookupDefaultTimeout
+	}
+
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	for {
+		ip, err := lookupIPByMAC(lookupCtx, mac)
 		if err == nil {
-			vmIP = &VMIP{
+			if started {
+				shutdownCtx := context.WithoutCancel(ctx)
+				if err := c.ensureVMPoweredOff(shutdownCtx, id); err != nil {
+					return nil, fmt.Errorf("shutdown virtual machine: %w", err)
+				}
+			}
+			return &VMIP{
 				IPAddress:  ip,
 				MACAddress: mac,
-			}
-			break
+			}, nil
 		}
-		lastErr = err
+		if !errors.Is(err, errIPNotFoundInARP) {
+			return nil, fmt.Errorf("lookup ip address for mac %q: %w", mac, err)
+		}
 
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-lookupCtx.Done():
+			return nil, fmt.Errorf("lookup ip address for mac %q: timed out waiting for arp entry: %w", mac, lookupCtx.Err())
 		case <-time.After(vmIPLookupPollInterval):
 		}
 	}
-
-	if vmIP == nil {
-		if started {
-			shutdownCtx := context.WithoutCancel(ctx)
-			_ = c.ensureVMPoweredOff(shutdownCtx, id)
-		}
-		return nil, fmt.Errorf("lookup ip address for mac %q: %w", mac, lastErr)
-	}
-
-	if started {
-		shutdownCtx := context.WithoutCancel(ctx)
-		if err := c.ensureVMPoweredOff(shutdownCtx, id); err != nil {
-			return nil, fmt.Errorf("shutdown virtual machine: %w", err)
-		}
-	}
-
-	return vmIP, nil
 }
 
 func lookupIPByMAC(ctx context.Context, mac string) (string, error) {
@@ -144,12 +195,25 @@ func lookupIPByMAC(ctx context.Context, mac string) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", "arp -a | grep -i "+shellQuote(mac))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		if isGrepNoMatch(err) {
+			return "", errIPNotFoundInARP
+		}
 		if len(output) == 0 {
 			return "", fmt.Errorf("arp lookup failed: %w", err)
 		}
 	}
 
-	return parseIPFromARPOutput(string(output))
+	ip, err := parseIPFromARPOutput(string(output))
+	if err != nil {
+		return "", errIPNotFoundInARP
+	}
+
+	return ip, nil
+}
+
+func isGrepNoMatch(err error) bool {
+	var exitErr *exec.ExitError
+	return errors.As(err, &exitErr) && exitErr.ExitCode() == 1
 }
 
 func parseIPFromARPOutput(output string) (string, error) {
@@ -164,7 +228,7 @@ func parseIPFromARPOutput(output string) (string, error) {
 		}
 	}
 
-	return "", errors.New("ip address not found in arp output")
+	return "", errIPNotFoundInARP
 }
 
 func shellQuote(s string) string {
