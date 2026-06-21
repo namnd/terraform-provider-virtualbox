@@ -10,21 +10,35 @@ import (
 	"github.com/namnd/terraform-provider-virtualbox/internal/vboxmanage"
 )
 
-func TestNetworkAdaptersToModelIncludesMACAddress(t *testing.T) {
+func TestMacAddressesFromAdapters(t *testing.T) {
 	t.Parallel()
 
-	models := networkAdaptersToModel([]vboxmanage.NetworkAdapter{
+	macAddresses, diags := macAddressesFromAdapters([]vboxmanage.NetworkAdapter{
 		{Type: "nat", PromiscuousMode: "deny", MACAddress: "08:00:27:EE:A5:E7"},
 		{Type: "bridged", HostInterface: "enp0s3", PromiscuousMode: "allow-vms", MACAddress: "08:00:27:41:A4:F8"},
 	})
-	if len(models) != 2 {
-		t.Fatalf("len(models) = %d, want %d", len(models), 2)
+	if diags.HasError() {
+		t.Fatalf("macAddressesFromAdapters() diagnostics = %v", diags.Errors())
 	}
-	if models[0].MACAddress.ValueString() != "08:00:27:EE:A5:E7" {
-		t.Fatalf("models[0].MACAddress = %q, want %q", models[0].MACAddress.ValueString(), "08:00:27:EE:A5:E7")
+	elems := macAddresses.Elements()
+	if len(elems) != 2 {
+		t.Fatalf("len(macAddresses) = %d, want %d", len(elems), 2)
 	}
-	if models[1].MACAddress.ValueString() != "08:00:27:41:A4:F8" {
-		t.Fatalf("models[1].MACAddress = %q, want %q", models[1].MACAddress.ValueString(), "08:00:27:41:A4:F8")
+
+	mac0, ok := elems[0].(types.String)
+	if !ok {
+		t.Fatalf("macAddresses[0] is %T, want types.String", elems[0])
+	}
+	if mac0.ValueString() != "08:00:27:EE:A5:E7" {
+		t.Fatalf("macAddresses[0] = %q, want %q", mac0.ValueString(), "08:00:27:EE:A5:E7")
+	}
+
+	mac1, ok := elems[1].(types.String)
+	if !ok {
+		t.Fatalf("macAddresses[1] is %T, want types.String", elems[1])
+	}
+	if mac1.ValueString() != "08:00:27:41:A4:F8" {
+		t.Fatalf("macAddresses[1] = %q, want %q", mac1.ValueString(), "08:00:27:41:A4:F8")
 	}
 }
 
