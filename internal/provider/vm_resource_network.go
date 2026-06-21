@@ -46,6 +46,11 @@ func networkAdaptersToModel(adapters []vboxmanage.NetworkAdapter) []networkAdapt
 		} else {
 			models[i].HostInterface = types.StringNull()
 		}
+		if adapter.MACAddress != "" {
+			models[i].MACAddress = types.StringValue(adapter.MACAddress)
+		} else {
+			models[i].MACAddress = types.StringNull()
+		}
 	}
 	return models
 }

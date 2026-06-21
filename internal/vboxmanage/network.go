@@ -29,6 +29,7 @@ type NetworkAdapter struct {
 	Type            string
 	HostInterface   string
 	PromiscuousMode string
+	MACAddress      string
 }
 
 // ValidateNetworkAdapter checks adapter settings.
@@ -68,6 +69,26 @@ func NormalizePromiscuousMode(mode string) string {
 		return PromiscuousModeDeny
 	}
 	return mode
+}
+
+// FormatMACAddress converts a VirtualBox MAC address (for example, 080027EEA5E7)
+// into colon-separated form (08:00:27:EE:A5:E7).
+func FormatMACAddress(mac string) string {
+	mac = strings.ToUpper(strings.TrimSpace(mac))
+	if mac == "" {
+		return ""
+	}
+	if strings.Contains(mac, ":") {
+		return mac
+	}
+	var b strings.Builder
+	for i, r := range mac {
+		if i > 0 && i%2 == 0 {
+			b.WriteByte(':')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // NetworkAdaptersEqual reports whether two adapter lists are identical.

@@ -49,7 +49,9 @@ UUID="9f69463b-2426-49be-8ad2-cb609e20953b"
 memory=2048
 cpus=2
 nic1="nat"
+macaddress1="080027EEA5E7"
 nic2="bridged"
+macaddress2="08002741A4F8"
 bridgeadapter2="enp0s3"
 CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 `
@@ -85,6 +87,12 @@ CfgFile="/Users/test/VirtualBox VMs/my-vm/my-vm.vbox"
 	}
 	if vm.NetworkAdapters[1].HostInterface != "enp0s3" {
 		t.Fatalf("NetworkAdapters[1].HostInterface = %q, want %q", vm.NetworkAdapters[1].HostInterface, "enp0s3")
+	}
+	if vm.NetworkAdapters[0].MACAddress != "08:00:27:EE:A5:E7" {
+		t.Fatalf("NetworkAdapters[0].MACAddress = %q, want %q", vm.NetworkAdapters[0].MACAddress, "08:00:27:EE:A5:E7")
+	}
+	if vm.NetworkAdapters[1].MACAddress != "08:00:27:41:A4:F8" {
+		t.Fatalf("NetworkAdapters[1].MACAddress = %q, want %q", vm.NetworkAdapters[1].MACAddress, "08:00:27:41:A4:F8")
 	}
 }
 

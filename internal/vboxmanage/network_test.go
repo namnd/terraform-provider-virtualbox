@@ -5,6 +5,30 @@ package vboxmanage
 
 import "testing"
 
+func TestFormatMACAddress(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		mac  string
+		want string
+	}{
+		{name: "virtualbox format", mac: "080027EEA5E7", want: "08:00:27:EE:A5:E7"},
+		{name: "already formatted", mac: "08:00:27:EE:A5:E7", want: "08:00:27:EE:A5:E7"},
+		{name: "empty", mac: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := FormatMACAddress(tt.mac); got != tt.want {
+				t.Fatalf("FormatMACAddress() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateNetworkAdapter(t *testing.T) {
 	t.Parallel()
 

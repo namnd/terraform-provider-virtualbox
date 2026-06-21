@@ -7,7 +7,26 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/namnd/terraform-provider-virtualbox/internal/vboxmanage"
 )
+
+func TestNetworkAdaptersToModelIncludesMACAddress(t *testing.T) {
+	t.Parallel()
+
+	models := networkAdaptersToModel([]vboxmanage.NetworkAdapter{
+		{Type: "nat", PromiscuousMode: "deny", MACAddress: "08:00:27:EE:A5:E7"},
+		{Type: "bridged", HostInterface: "enp0s3", PromiscuousMode: "allow-vms", MACAddress: "08:00:27:41:A4:F8"},
+	})
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want %d", len(models), 2)
+	}
+	if models[0].MACAddress.ValueString() != "08:00:27:EE:A5:E7" {
+		t.Fatalf("models[0].MACAddress = %q, want %q", models[0].MACAddress.ValueString(), "08:00:27:EE:A5:E7")
+	}
+	if models[1].MACAddress.ValueString() != "08:00:27:41:A4:F8" {
+		t.Fatalf("models[1].MACAddress = %q, want %q", models[1].MACAddress.ValueString(), "08:00:27:41:A4:F8")
+	}
+}
 
 func TestNetworkAdaptersFromModel(t *testing.T) {
 	t.Parallel()

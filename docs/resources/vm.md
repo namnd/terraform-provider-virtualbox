@@ -67,3 +67,7 @@ Optional:
 
 - `host_interface` (String) Host network interface name. Required when `type` is `bridged`.
 - `promiscuous_mode` (String) Promiscuous mode. Must be one of: `deny`, `allow-vms`, `allow-all`.
+
+Read-Only:
+
+- `mac_address` (String) MAC address assigned to the network adapter.

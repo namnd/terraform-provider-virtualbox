@@ -38,6 +38,7 @@ type networkAdapterModel struct {
 	Type            types.String `tfsdk:"type"`
 	HostInterface   types.String `tfsdk:"host_interface"`
 	PromiscuousMode types.String `tfsdk:"promiscuous_mode"`
+	MACAddress      types.String `tfsdk:"mac_address"`
 }
 
 type vmResourceModel struct {
@@ -127,6 +128,10 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 							Computed:            true,
 							MarkdownDescription: "Promiscuous mode. Must be one of: `deny`, `allow-vms`, `allow-all`.",
 							Default:             stringdefault.StaticString("deny"),
+						},
+						"mac_address": schema.StringAttribute{
+							Computed:            true,
+							MarkdownDescription: "MAC address assigned to the network adapter.",
 						},
 					},
 				},
