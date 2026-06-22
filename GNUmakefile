@@ -21,6 +21,9 @@ test:
 testacc:
 	TF_ACC=1 go test -v -cover -timeout 120m ./...
 
+tftest: 
+	TF_CLI_CONFIG_FILE=./tests/.terraformrc terraform test
+
 all: lint test generate
 
 .PHONY: all fmt lint test testacc build install generate

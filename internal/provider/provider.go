@@ -5,7 +5,7 @@ package provider
 
 import (
 	"context"
-	"net/http"
+	"fmt"
 
 	"github.com/hashicorp/terraform-plugin-framework/action"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
@@ -15,6 +15,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/namnd/terraform-provider-virtualbox/internal/vboxmanage"
 )
 
 // Ensure VirtualboxProvider satisfies various provider interfaces.
@@ -61,17 +62,33 @@ func (p *VirtualboxProvider) Configure(ctx context.Context, req provider.Configu
 		return
 	}
 
-	// Configuration values are now available.
-	// if data.Endpoint.IsNull() { /* ... */ }
+	client, err := vboxmanage.New()
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to create VBoxManage client",
+			fmt.Sprintf("Could not initialize VBoxManage client: %s", err),
+		)
+	}
 
-	// Example client configuration for data sources and resources
-	client := http.DefaultClient
+	if _, err := client.Version(ctx); err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to connect to VirtualBox",
+			fmt.Sprintf("Could not verify VBoxManage installation: %s", err),
+		)
+	}
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	resp.DataSourceData = client
 	resp.ResourceData = client
 }
 
 func (p *VirtualboxProvider) Resources(ctx context.Context) []func() resource.Resource {
-	return []func() resource.Resource{}
+	return []func() resource.Resource{
+		NewVMResource,
+	}
 }
 
 func (p *VirtualboxProvider) EphemeralResources(ctx context.Context) []func() ephemeral.EphemeralResource {
