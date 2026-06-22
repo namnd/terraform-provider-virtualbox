@@ -21,4 +21,6 @@ test:
 testacc:
 	TF_ACC=1 go test -v -cover -timeout 120m ./...
 
-.PHONY: fmt lint test testacc build install generate
+all: lint test generate
+
+.PHONY: all fmt lint test testacc build install generate
