@@ -17,3 +17,12 @@ variable "memory" {
   type    = number
   default = 1024
 }
+
+variable "network_adapters" {
+  type = list(object({
+    type             = string
+    host_interface   = optional(string)
+    promiscuous_mode = optional(string)
+  }))
+  default = []
+}

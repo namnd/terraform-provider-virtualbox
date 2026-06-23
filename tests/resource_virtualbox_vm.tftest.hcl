@@ -71,6 +71,7 @@ run "update_vm_os_type" {
   command = apply
 
   variables {
+    name    = "tftest-vm-update"
     os_type = "Linux"
   }
 
@@ -81,5 +82,27 @@ run "update_vm_os_type" {
   assert {
     condition     = virtualbox_vm.vm.os_type == "Linux"
     error_message = "The output VM os_type is not correct."
+  }
+}
+
+run "add_vm_network_adapater" {
+  command = apply
+
+  variables {
+    name = "tftest-vm-update"
+    network_adapters = [
+      {
+        type = "nat"
+      }
+    ]
+  }
+
+  module {
+    source = "./examples/resources/virtualbox_vm/"
+  }
+
+  assert {
+    condition     = virtualbox_vm.vm.network_adapter[0].type == "nat"
+    error_message = "The output VM network_adapter config is not correct."
   }
 }

@@ -35,7 +35,13 @@ func (m *mockVirtualBox) CreateVM(ctx context.Context, name string, opts vboxman
 	if m.createVMFunc != nil {
 		return m.createVMFunc(ctx, name, opts)
 	}
-	return &vboxmanage.VM{Name: name, UUID: "uuid-" + name, CPUs: opts.CPUs, Memory: opts.Memory}, nil
+	return &vboxmanage.VM{
+		Name:            name,
+		UUID:            "uuid-" + name,
+		CPUs:            opts.CPUs,
+		Memory:          opts.Memory,
+		NetworkAdapters: opts.NetworkAdapters,
+	}, nil
 }
 
 func (m *mockVirtualBox) GetVM(ctx context.Context, id string) (*vboxmanage.VM, error) {
@@ -61,6 +67,9 @@ func (m *mockVirtualBox) UpdateVM(ctx context.Context, id string, opts vboxmanag
 	}
 	if opts.Memory != nil {
 		vm.Memory = *opts.Memory
+	}
+	if opts.NetworkAdapters != nil {
+		vm.NetworkAdapters = *opts.NetworkAdapters
 	}
 	return vm, nil
 }
@@ -234,6 +243,106 @@ func TestVMResourceCreate(t *testing.T) {
 			t.Fatal("expected diagnostics error when create fails")
 		}
 	})
+
+	t.Run("creates vm with network adapters", func(t *testing.T) {
+		t.Parallel()
+
+		networkAdapters := []networkAdapterModel{
+			{
+				Type:            types.StringValue("nat"),
+				HostInterface:   types.StringNull(),
+				PromiscuousMode: types.StringValue("deny"),
+			},
+			{
+				Type:            types.StringValue("bridged"),
+				HostInterface:   types.StringValue("eth0"),
+				PromiscuousMode: types.StringValue("allow-all"),
+			},
+		}
+
+		mock := &mockVirtualBox{
+			createVMFunc: func(_ context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error) {
+				if len(opts.NetworkAdapters) != 2 {
+					t.Fatalf("CreateVM NetworkAdapters len = %d, want 2", len(opts.NetworkAdapters))
+				}
+				if opts.NetworkAdapters[0].Type != "nat" {
+					t.Fatalf("CreateVM NetworkAdapters[0].Type = %q, want %q", opts.NetworkAdapters[0].Type, "nat")
+				}
+				if opts.NetworkAdapters[1].Type != "bridged" || opts.NetworkAdapters[1].HostInterface != "eth0" {
+					t.Fatalf("CreateVM NetworkAdapters[1] = %+v, want bridged on eth0", opts.NetworkAdapters[1])
+				}
+				return &vboxmanage.VM{
+					Name:            name,
+					UUID:            "uuid-123",
+					CPUs:            opts.CPUs,
+					Memory:          opts.Memory,
+					NetworkAdapters: opts.NetworkAdapters,
+				}, nil
+			},
+		}
+		r := newTestVMResource(t, mock)
+
+		req := resource.CreateRequest{
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name":    types.StringValue("test-vm"),
+					"os_type": types.StringValue("Linux_64"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &networkAdapters,
+			}),
+		}
+		resp := &resource.CreateResponse{State: tfsdk.State{Schema: schema}}
+
+		r.Create(ctx, req, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("Create diagnostics: %v", resp.Diagnostics)
+		}
+
+		state := vmGetStateModel(t, ctx, resp.State)
+		if len(state.NetworkAdapters) != 2 {
+			t.Fatalf("state.NetworkAdapters len = %d, want 2", len(state.NetworkAdapters))
+		}
+		if state.NetworkAdapters[0].Type.ValueString() != "nat" {
+			t.Fatalf("state.NetworkAdapters[0].Type = %q, want %q", state.NetworkAdapters[0].Type.ValueString(), "nat")
+		}
+		if state.NetworkAdapters[1].HostInterface.ValueString() != "eth0" {
+			t.Fatalf("state.NetworkAdapters[1].HostInterface = %q, want %q", state.NetworkAdapters[1].HostInterface.ValueString(), "eth0")
+		}
+	})
+
+	t.Run("invalid network adapter", func(t *testing.T) {
+		t.Parallel()
+
+		networkAdapters := []networkAdapterModel{
+			{Type: types.StringValue("bridged")},
+		}
+
+		r := newTestVMResource(t, &mockVirtualBox{})
+
+		req := resource.CreateRequest{
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name":    types.StringValue("test-vm"),
+					"os_type": types.StringValue("Linux_64"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &networkAdapters,
+			}),
+		}
+		resp := &resource.CreateResponse{State: tfsdk.State{Schema: schema}}
+
+		r.Create(ctx, req, resp)
+		if !resp.Diagnostics.HasError() {
+			t.Fatal("expected diagnostics error for invalid network adapter")
+		}
+	})
 }
 
 func TestVMResourceRead(t *testing.T) {
@@ -341,6 +450,59 @@ func TestVMResourceRead(t *testing.T) {
 		r.Read(ctx, req, resp)
 		if !resp.Diagnostics.HasError() {
 			t.Fatal("expected diagnostics error when read fails")
+		}
+	})
+
+	t.Run("populates network adapters", func(t *testing.T) {
+		t.Parallel()
+
+		mock := &mockVirtualBox{
+			getVMFunc: func(_ context.Context, id string) (*vboxmanage.VM, error) {
+				return &vboxmanage.VM{
+					Name:   "test-vm",
+					UUID:   id,
+					CPUs:   1,
+					Memory: 1024,
+					NetworkAdapters: []vboxmanage.NetworkAdapter{
+						{Type: "nat"},
+						{
+							Type:            "bridged",
+							HostInterface:   "wlan0",
+							PromiscuousMode: "allow-vms",
+						},
+					},
+				}, nil
+			},
+		}
+		r := newTestVMResource(t, mock)
+
+		req := resource.ReadRequest{
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("test-vm"),
+				},
+			}),
+		}
+		resp := &resource.ReadResponse{State: tfsdk.State{Schema: schema}}
+
+		r.Read(ctx, req, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("Read diagnostics: %v", resp.Diagnostics)
+		}
+
+		state := vmGetStateModel(t, ctx, resp.State)
+		if len(state.NetworkAdapters) != 2 {
+			t.Fatalf("state.NetworkAdapters len = %d, want 2", len(state.NetworkAdapters))
+		}
+		if state.NetworkAdapters[0].Type.ValueString() != "nat" {
+			t.Fatalf("state.NetworkAdapters[0].Type = %q, want %q", state.NetworkAdapters[0].Type.ValueString(), "nat")
+		}
+		if state.NetworkAdapters[1].HostInterface.ValueString() != "wlan0" {
+			t.Fatalf("state.NetworkAdapters[1].HostInterface = %q, want %q", state.NetworkAdapters[1].HostInterface.ValueString(), "wlan0")
+		}
+		if state.NetworkAdapters[1].PromiscuousMode.ValueString() != "allow-vms" {
+			t.Fatalf("state.NetworkAdapters[1].PromiscuousMode = %q, want %q", state.NetworkAdapters[1].PromiscuousMode.ValueString(), "allow-vms")
 		}
 	})
 }
@@ -543,6 +705,183 @@ func TestVMResourceUpdate(t *testing.T) {
 		r.Update(ctx, req, resp)
 		if !resp.Diagnostics.HasError() {
 			t.Fatal("expected diagnostics error when update fails")
+		}
+	})
+
+	t.Run("updates network adapters", func(t *testing.T) {
+		t.Parallel()
+
+		planAdapters := []networkAdapterModel{
+			{
+				Type:            types.StringValue("bridged"),
+				HostInterface:   types.StringValue("eth0"),
+				PromiscuousMode: types.StringValue("allow-all"),
+			},
+		}
+		stateAdapters := []networkAdapterModel{
+			{
+				Type:            types.StringValue("nat"),
+				HostInterface:   types.StringNull(),
+				PromiscuousMode: types.StringValue("deny"),
+			},
+		}
+
+		mock := &mockVirtualBox{
+			updateVMFunc: func(_ context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error) {
+				if opts.NetworkAdapters == nil {
+					t.Fatal("expected network adapters to be updated")
+				}
+				if len(*opts.NetworkAdapters) != 1 {
+					t.Fatalf("UpdateVM NetworkAdapters len = %d, want 1", len(*opts.NetworkAdapters))
+				}
+				if (*opts.NetworkAdapters)[0].Type != "bridged" || (*opts.NetworkAdapters)[0].HostInterface != "eth0" {
+					t.Fatalf("UpdateVM NetworkAdapters[0] = %+v, want bridged on eth0", (*opts.NetworkAdapters)[0])
+				}
+				return &vboxmanage.VM{
+					Name:            "same-name",
+					UUID:            id,
+					CPUs:            1,
+					Memory:          1024,
+					NetworkAdapters: *opts.NetworkAdapters,
+				}, nil
+			},
+		}
+		r := newTestVMResource(t, mock)
+
+		req := resource.UpdateRequest{
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &planAdapters,
+			}),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &stateAdapters,
+			}),
+		}
+		resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schema}}
+
+		r.Update(ctx, req, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("Update diagnostics: %v", resp.Diagnostics)
+		}
+
+		state := vmGetStateModel(t, ctx, resp.State)
+		if len(state.NetworkAdapters) != 1 {
+			t.Fatalf("state.NetworkAdapters len = %d, want 1", len(state.NetworkAdapters))
+		}
+		if state.NetworkAdapters[0].Type.ValueString() != "bridged" {
+			t.Fatalf("state.NetworkAdapters[0].Type = %q, want %q", state.NetworkAdapters[0].Type.ValueString(), "bridged")
+		}
+		if mock.updateVMCalls != 1 {
+			t.Fatalf("UpdateVM calls = %d, want 1", mock.updateVMCalls)
+		}
+	})
+
+	t.Run("skips update when network adapters unchanged", func(t *testing.T) {
+		t.Parallel()
+
+		networkAdapters := []networkAdapterModel{
+			{
+				Type:            types.StringValue("nat"),
+				HostInterface:   types.StringNull(),
+				PromiscuousMode: types.StringValue("deny"),
+			},
+		}
+
+		mock := &mockVirtualBox{}
+		r := newTestVMResource(t, mock)
+
+		req := resource.UpdateRequest{
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &networkAdapters,
+			}),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &networkAdapters,
+			}),
+		}
+		resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schema}}
+
+		r.Update(ctx, req, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("Update diagnostics: %v", resp.Diagnostics)
+		}
+		if mock.updateVMCalls != 0 {
+			t.Fatalf("UpdateVM calls = %d, want 0", mock.updateVMCalls)
+		}
+	})
+
+	t.Run("invalid network adapter", func(t *testing.T) {
+		t.Parallel()
+
+		planAdapters := []networkAdapterModel{
+			{Type: types.StringValue("invalid")},
+		}
+		stateAdapters := []networkAdapterModel{
+			{
+				Type:            types.StringValue("nat"),
+				HostInterface:   types.StringNull(),
+				PromiscuousMode: types.StringValue("deny"),
+			},
+		}
+
+		r := newTestVMResource(t, &mockVirtualBox{})
+
+		req := resource.UpdateRequest{
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &planAdapters,
+			}),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+				NetworkAdapters: &stateAdapters,
+			}),
+		}
+		resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schema}}
+
+		r.Update(ctx, req, resp)
+		if !resp.Diagnostics.HasError() {
+			t.Fatal("expected diagnostics error for invalid network adapter")
 		}
 	})
 }

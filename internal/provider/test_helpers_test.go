@@ -15,8 +15,9 @@ import (
 )
 
 type vmTestAttributeValues struct {
-	Strings map[string]types.String
-	Int64s  map[string]types.Int64
+	Strings         map[string]types.String
+	Int64s          map[string]types.Int64
+	NetworkAdapters *[]networkAdapterModel
 }
 
 func vmTestSchema(t *testing.T) schema.Schema {
@@ -61,6 +62,11 @@ func vmTestObjectValue(t *testing.T, s schema.Schema, attrs vmTestAttributeValue
 	tfAttrs := make(map[string]tftypes.Value, len(objectType.AttributeTypes))
 
 	for name, attrType := range objectType.AttributeTypes {
+		if attrs.NetworkAdapters != nil && name == "network_adapter" {
+			tfAttrs[name] = vmTestNetworkAdapterListValue(t, attrType, *attrs.NetworkAdapters)
+			continue
+		}
+
 		if value, ok := attrs.Strings[name]; ok {
 			tfValue, err := value.ToTerraformValue(ctx)
 			if err != nil {
@@ -83,6 +89,41 @@ func vmTestObjectValue(t *testing.T, s schema.Schema, attrs vmTestAttributeValue
 	}
 
 	return tftypes.NewValue(objectType, tfAttrs)
+}
+
+func vmTestNetworkAdapterListValue(t *testing.T, listType tftypes.Type, adapters []networkAdapterModel) tftypes.Value {
+	t.Helper()
+
+	ctx := context.Background()
+
+	list, ok := listType.(tftypes.List)
+	if !ok {
+		t.Fatalf("expected tftypes.List, got %T", listType)
+	}
+
+	elements := make([]tftypes.Value, len(adapters))
+	for i, adapter := range adapters {
+		typeVal, err := adapter.Type.ToTerraformValue(ctx)
+		if err != nil {
+			t.Fatalf("failed to convert network adapter type to terraform value: %v", err)
+		}
+		hostIfaceVal, err := adapter.HostInterface.ToTerraformValue(ctx)
+		if err != nil {
+			t.Fatalf("failed to convert network adapter host_interface to terraform value: %v", err)
+		}
+		promiscVal, err := adapter.PromiscuousMode.ToTerraformValue(ctx)
+		if err != nil {
+			t.Fatalf("failed to convert network adapter promiscuous_mode to terraform value: %v", err)
+		}
+
+		elements[i] = tftypes.NewValue(list.ElementType, map[string]tftypes.Value{
+			"type":             typeVal,
+			"host_interface":   hostIfaceVal,
+			"promiscuous_mode": promiscVal,
+		})
+	}
+
+	return tftypes.NewValue(listType, elements)
 }
 
 func vmGetStateModel(t *testing.T, ctx context.Context, state tfsdk.State) vmResourceModel {

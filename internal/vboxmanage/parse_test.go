@@ -61,10 +61,19 @@ func TestParseCreateVMOutput(t *testing.T) {
 }
 
 func vmEqual(got, want *VM) bool {
-	return got.Name == want.Name &&
-		got.UUID == want.UUID &&
-		got.CPUs == want.CPUs &&
-		got.Memory == want.Memory
+	if got.Name != want.Name ||
+		got.UUID != want.UUID ||
+		got.CPUs != want.CPUs ||
+		got.Memory != want.Memory ||
+		len(got.NetworkAdapters) != len(want.NetworkAdapters) {
+		return false
+	}
+	for i := range got.NetworkAdapters {
+		if got.NetworkAdapters[i] != want.NetworkAdapters[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestParseShowVMInfoOutput(t *testing.T) {
@@ -110,6 +119,28 @@ memory=2048
 			stdout:  `name="test-vm"`,
 			wantErr: "name or UUID was not found",
 		},
+		{
+			name: "parses network adapters",
+			stdout: `name="test-vm"
+UUID="abc-def-123"
+nic1="nat"
+nic2="bridged"
+bridgeadapter2="eth0"
+nic3="none"
+`,
+			want: &VM{
+				Name: "test-vm",
+				UUID: "abc-def-123",
+				NetworkAdapters: []NetworkAdapter{
+					{Type: NetworkTypeNAT, PromiscuousMode: PromiscuousModeDeny},
+					{
+						Type:            NetworkTypeBridged,
+						HostInterface:   "eth0",
+						PromiscuousMode: PromiscuousModeDeny,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -134,5 +165,59 @@ memory=2048
 				t.Fatalf("got %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseNetworkAdapters(t *testing.T) {
+	t.Parallel()
+
+	stdout := `nic1="nat"
+nic2="bridged"
+bridgeadapter2="wlan0"
+nic3="none"
+nic4=""
+`
+	got := parseNetworkAdapters(stdout)
+	want := []NetworkAdapter{
+		{Type: NetworkTypeNAT, PromiscuousMode: PromiscuousModeDeny},
+		{
+			Type:            NetworkTypeBridged,
+			HostInterface:   "wlan0",
+			PromiscuousMode: PromiscuousModeDeny,
+		},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseNetworkAdapters() len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("parseNetworkAdapters()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestApplyPromiscuousModes(t *testing.T) {
+	t.Parallel()
+
+	vm := &VM{
+		NetworkAdapters: []NetworkAdapter{
+			{Type: NetworkTypeNAT, PromiscuousMode: PromiscuousModeDeny},
+			{
+				Type:            NetworkTypeBridged,
+				HostInterface:   "eth0",
+				PromiscuousMode: PromiscuousModeDeny,
+			},
+		},
+	}
+	stdout := `NIC 1: ... Promisc Policy: allow-vms, ...
+NIC 2: ... Promisc Policy: allow-all, ...
+`
+	applyPromiscuousModes(vm, stdout)
+
+	if vm.NetworkAdapters[0].PromiscuousMode != PromiscuousModeAllowVMs {
+		t.Fatalf("NetworkAdapters[0].PromiscuousMode = %q, want %q", vm.NetworkAdapters[0].PromiscuousMode, PromiscuousModeAllowVMs)
+	}
+	if vm.NetworkAdapters[1].PromiscuousMode != PromiscuousModeAllowAll {
+		t.Fatalf("NetworkAdapters[1].PromiscuousMode = %q, want %q", vm.NetworkAdapters[1].PromiscuousMode, PromiscuousModeAllowAll)
 	}
 }

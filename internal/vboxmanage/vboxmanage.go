@@ -8,34 +8,47 @@ import (
 	"errors"
 	"strconv"
 	"strings"
+	"time"
+)
+
+const (
+	vmStateRunning = "running"
+	vmStatePaused  = "paused"
+	vmStateSaved   = "saved"
 )
 
 type VM struct {
-	Name   string
-	UUID   string
-	CPUs   int
-	Memory int
+	Name            string
+	UUID            string
+	CPUs            int
+	Memory          int
+	NetworkAdapters []NetworkAdapter
 }
 
 type CreateVMOptions struct {
-	BaseFolder string
-	OSType     string
-	Groups     string
-	CPUs       int
-	Memory     int
+	BaseFolder      string
+	OSType          string
+	Groups          string
+	CPUs            int
+	Memory          int
+	NetworkAdapters []NetworkAdapter
 }
 
 // UpdateVMOptions configures mutable settings for UpdateVM.
 // Only non-nil fields are applied.
 type UpdateVMOptions struct {
-	Name   *string
-	CPUs   *int
-	Memory *int
+	Name            *string
+	CPUs            *int
+	Memory          *int
+	NetworkAdapters *[]NetworkAdapter
 }
 
 // HasChanges reports whether any mutable setting is set.
 func (opts UpdateVMOptions) HasChanges() bool {
-	return opts.Name != nil || opts.CPUs != nil || opts.Memory != nil
+	return opts.Name != nil ||
+		opts.CPUs != nil ||
+		opts.Memory != nil ||
+		opts.NetworkAdapters != nil
 }
 
 // CreateVM creates and registers a new virtual machine.
@@ -69,56 +82,59 @@ func (c *Client) CreateVM(ctx context.Context, name string, opts CreateVMOptions
 		return nil, err
 	}
 
-	if err := c.applyVMSettings(ctx, vm.UUID, UpdateVMOptions{
-		CPUs:   intPtr(opts.CPUs),
-		Memory: intPtr(opts.Memory),
-	}); err != nil {
+	changes := UpdateVMOptions{
+		CPUs:            intPtr(opts.CPUs),
+		Memory:          intPtr(opts.Memory),
+		NetworkAdapters: &opts.NetworkAdapters,
+	}
+
+	if err := c.applyVMChanges(ctx, vm.UUID, changes); err != nil {
 		return nil, err
 	}
 
 	return c.GetVM(ctx, vm.UUID)
 }
 
-func (c *Client) applyVMSettings(ctx context.Context, id string, opts UpdateVMOptions) error {
+func buildModifyVMArgs(id string, opts UpdateVMOptions) ([]string, error) {
 	args := []string{"modifyvm", id}
 	hasChange := false
 
 	if opts.Name != nil {
 		name := strings.TrimSpace(*opts.Name)
 		if name == "" {
-			return errors.New("virtual machine name must not be empty")
+			return nil, errors.New("virtual machine name must not be empty")
 		}
 		args = append(args, "--name", name)
 		hasChange = true
 	}
 	if opts.CPUs != nil {
 		if *opts.CPUs < 1 {
-			return errors.New("virtual machine CPUs must be at least 1")
+			return nil, errors.New("virtual machine CPUs must be at least 1")
 		}
 		args = append(args, "--cpus", strconv.Itoa(*opts.CPUs))
 		hasChange = true
 	}
 	if opts.Memory != nil {
 		if *opts.Memory < 4 {
-			return errors.New("virtual machine memory must be at least 4 MB")
+			return nil, errors.New("virtual machine memory must be at least 4 MB")
 		}
 		args = append(args, "--memory", strconv.Itoa(*opts.Memory))
 		hasChange = true
 	}
+	if opts.NetworkAdapters != nil {
+		nicArgs, err := networkModifyVMArgs(*opts.NetworkAdapters)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, nicArgs...)
+		hasChange = true
+	}
 
 	if !hasChange {
-		return nil
+		return nil, nil
 	}
 
-	_, stderr, err := c.RunWithOutput(ctx, args...)
-	if err != nil {
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return vmErr
-		}
-		return err
-	}
-
-	return nil
+	return args, nil
 }
 
 func intPtr(v int) *int {
@@ -144,7 +160,17 @@ func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
 		return nil, err
 	}
 
-	return parseShowVMInfoOutput(stdout)
+	vm, err := parseShowVMInfoOutput(stdout)
+	if err != nil {
+		return nil, err
+	}
+
+	humanStdout, _, humanErr := c.RunWithOutput(ctx, "showvminfo", id)
+	if humanErr == nil {
+		applyPromiscuousModes(vm, humanStdout)
+	}
+
+	return vm, nil
 }
 
 // UpdateVM updates settings on a registered virtual machine.
@@ -159,11 +185,44 @@ func (c *Client) UpdateVM(ctx context.Context, id string, opts UpdateVMOptions) 
 		return nil, errors.New("at least one VM setting must be provided")
 	}
 
-	if err := c.applyVMSettings(ctx, id, opts); err != nil {
+	if err := c.prepareVMForModify(ctx, id); err != nil {
+		return nil, err
+	}
+
+	if err := c.applyVMChanges(ctx, id, opts); err != nil {
 		return nil, err
 	}
 
 	return c.GetVM(ctx, id)
+}
+
+func (c *Client) runUnregisterVM(ctx context.Context, id string) error {
+	const maxAttempts = 5
+
+	var lastErr error
+	for attempt := range maxAttempts {
+		_, stderr, err := c.RunWithOutput(ctx, "unregistervm", id, "--delete-all")
+		if err == nil {
+			return nil
+		}
+
+		if vmErr := classifyVMError(stderr); vmErr != nil {
+			return vmErr
+		}
+
+		lastErr = err
+		if !isVMLockError(stderr) || attempt == maxAttempts-1 {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
+		}
+	}
+
+	return lastErr
 }
 
 // DeleteVM unregisters a virtual machine and deletes its associated files.
@@ -174,15 +233,94 @@ func (c *Client) DeleteVM(ctx context.Context, id string) error {
 		return errors.New("virtual machine id must not be empty")
 	}
 
-	// Best-effort power off so unregistervm can proceed if the VM is running.
-	_, _ = c.Run(ctx, "controlvm", id, "poweroff")
+	if err := c.prepareVMForModify(ctx, id); err != nil {
+		return err
+	}
 
-	_, stderr, err := c.RunWithOutput(ctx, "unregistervm", id, "--delete-all")
+	return c.runUnregisterVM(ctx, id)
+}
+
+func isVMLockError(stderr string) bool {
+	msg := strings.ToLower(stderr)
+	return strings.Contains(msg, "already locked") ||
+		strings.Contains(msg, "while it is locked") ||
+		strings.Contains(msg, "vbox_e_invalid_object_state")
+}
+
+func (c *Client) runModifyVM(ctx context.Context, args ...string) error {
+	const maxAttempts = 5
+
+	var lastErr error
+	for attempt := range maxAttempts {
+		_, stderr, err := c.RunWithOutput(ctx, args...)
+		if err == nil {
+			return nil
+		}
+
+		if vmErr := classifyVMError(stderr); vmErr != nil {
+			return vmErr
+		}
+
+		lastErr = err
+		if !isVMLockError(stderr) || attempt == maxAttempts-1 {
+			return err
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
+		}
+	}
+
+	return lastErr
+}
+
+func (c *Client) applyVMChanges(ctx context.Context, id string, opts UpdateVMOptions) error {
+	args, err := buildModifyVMArgs(id, opts)
+	if err != nil {
+		return err
+	}
+	if args == nil {
+		return nil
+	}
+
+	return c.runModifyVM(ctx, args...)
+}
+
+func isVMNotRunningError(stderr string) bool {
+	msg := strings.ToLower(stderr)
+	return strings.Contains(msg, "is not currently running") ||
+		strings.Contains(msg, "not powered on")
+}
+
+// prepareVMForModify ensures the VM is stopped so settings can be changed or it can be unregistered.
+func (c *Client) prepareVMForModify(ctx context.Context, id string) error {
+	stdout, stderr, err := c.RunWithOutput(ctx, "showvminfo", id, "--machinereadable")
 	if err != nil {
 		if vmErr := classifyVMError(stderr); vmErr != nil {
 			return vmErr
 		}
 		return err
+	}
+
+	switch parseVMState(stdout) {
+	case vmStateRunning, vmStatePaused:
+		_, stderr, err = c.RunWithOutput(ctx, "controlvm", id, "poweroff")
+		if err != nil && !isVMNotRunningError(stderr) {
+			if vmErr := classifyVMError(stderr); vmErr != nil {
+				return vmErr
+			}
+			return err
+		}
+	case vmStateSaved:
+		_, stderr, err = c.RunWithOutput(ctx, "discardstate", id)
+		if err != nil {
+			if vmErr := classifyVMError(stderr); vmErr != nil {
+				return vmErr
+			}
+			return err
+		}
 	}
 
 	return nil

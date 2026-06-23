@@ -34,13 +34,20 @@ type vmResource struct {
 	client vboxmanage.VirtualBox
 }
 
+type networkAdapterModel struct {
+	Type            types.String `tfsdk:"type"`
+	HostInterface   types.String `tfsdk:"host_interface"`
+	PromiscuousMode types.String `tfsdk:"promiscuous_mode"`
+}
+
 type vmResourceModel struct {
-	ID          types.String `tfsdk:"id"`
-	Name        types.String `tfsdk:"name"`
-	OSType      types.String `tfsdk:"os_type"`
-	CPUs        types.Int64  `tfsdk:"cpus"`
-	Memory      types.Int64  `tfsdk:"memory"`
-	LastUpdated types.String `tfsdk:"last_updated"`
+	ID              types.String          `tfsdk:"id"`
+	Name            types.String          `tfsdk:"name"`
+	OSType          types.String          `tfsdk:"os_type"`
+	CPUs            types.Int64           `tfsdk:"cpus"`
+	Memory          types.Int64           `tfsdk:"memory"`
+	NetworkAdapters []networkAdapterModel `tfsdk:"network_adapter"`
+	LastUpdated     types.String          `tfsdk:"last_updated"`
 }
 
 // Metadata returns the resource type name.
@@ -105,6 +112,29 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 				Default:             int64default.StaticInt64(1024),
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"network_adapter": schema.ListNestedBlock{
+				MarkdownDescription: "Network adapter configuration.",
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						"type": schema.StringAttribute{
+							Required:            true,
+							MarkdownDescription: "Adapter type. Must be one of: `nat`, `bridged`.",
+						},
+						"host_interface": schema.StringAttribute{
+							Optional:            true,
+							MarkdownDescription: "Host network interface name. Required when `type` is `bridged`.",
+						},
+						"promiscuous_mode": schema.StringAttribute{
+							Optional:            true,
+							Computed:            true,
+							MarkdownDescription: "Promiscuous mode. Must be one of: `deny`, `allow-vms`, `allow-all`.",
+							Default:             stringdefault.StaticString("deny"),
+						},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -117,10 +147,17 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		return
 	}
 
+	networkAdapters, diags := networkAdaptersFromModel(plan.NetworkAdapters)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	vm, err := r.client.CreateVM(ctx, plan.Name.ValueString(), vboxmanage.CreateVMOptions{
-		OSType: plan.OSType.ValueString(),
-		CPUs:   int(plan.CPUs.ValueInt64()),
-		Memory: int(plan.Memory.ValueInt64()),
+		OSType:          plan.OSType.ValueString(),
+		CPUs:            int(plan.CPUs.ValueInt64()),
+		Memory:          int(plan.Memory.ValueInt64()),
+		NetworkAdapters: networkAdapters,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -133,6 +170,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	plan.ID = types.StringValue(vm.UUID)
 	plan.CPUs = types.Int64Value(int64(vm.CPUs))
 	plan.Memory = types.Int64Value(int64(vm.Memory))
+	plan.NetworkAdapters = networkAdaptersToModel(vm.NetworkAdapters)
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
 
 	diags = resp.State.Set(ctx, plan)
@@ -168,6 +206,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	state.ID = types.StringValue(vm.UUID)
 	state.CPUs = types.Int64Value(int64(vm.CPUs))
 	state.Memory = types.Int64Value(int64(vm.Memory))
+	state.NetworkAdapters = networkAdaptersToModel(vm.NetworkAdapters)
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -208,6 +247,14 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		memory := int(plan.Memory.ValueInt64())
 		updateOpts.Memory = &memory
 	}
+	if !networkAdaptersModelEqual(plan.NetworkAdapters, state.NetworkAdapters) {
+		networkAdapters, diags := networkAdaptersFromModel(plan.NetworkAdapters)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateOpts.NetworkAdapters = &networkAdapters
+	}
 
 	if updateOpts.HasChanges() {
 		vm, err := r.client.UpdateVM(ctx, state.ID.ValueString(), updateOpts)
@@ -221,6 +268,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		plan.Name = types.StringValue(vm.Name)
 		plan.CPUs = types.Int64Value(int64(vm.CPUs))
 		plan.Memory = types.Int64Value(int64(vm.Memory))
+		plan.NetworkAdapters = networkAdaptersToModel(vm.NetworkAdapters)
 	}
 
 	plan.ID = state.ID

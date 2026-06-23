@@ -17,4 +17,14 @@ resource "virtualbox_vm" "vm" {
 
   cpus   = var.cpus
   memory = var.memory
+
+  dynamic "network_adapter" {
+    // maintain the order of the list
+    for_each = { for k, v in var.network_adapters : k => v }
+    content {
+      type             = network_adapter.value.type
+      host_interface   = network_adapter.value.host_interface
+      promiscuous_mode = network_adapter.value.promiscuous_mode
+    }
+  }
 }

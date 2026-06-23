@@ -69,6 +69,13 @@ createvm)
 	;;
 showvminfo)
 	id="$2"
+	shift 2
+	machine_readable=false
+	for arg in "$@"; do
+		if [ "$arg" = "--machinereadable" ]; then
+			machine_readable=true
+		fi
+	done
 	if [ "$id" = "missing" ]; then
 		echo "VBoxManage: error: Could not find a registered machine named 'missing'" >&2
 		exit 1
@@ -79,10 +86,34 @@ showvminfo)
 		vm_key="${id#uuid-for-}"
 		;;
 	esac
-	echo "name=\"vm-$vm_key\""
-	echo "UUID=\"uuid-for-$vm_key\""
-	echo "cpus=$(vm_get_cpus "$id")"
-	echo "memory=$(vm_get_memory "$id")"
+	if [ "$machine_readable" = true ]; then
+		echo "name=\"vm-$vm_key\""
+		echo "UUID=\"uuid-for-$vm_key\""
+		echo "cpus=$(vm_get_cpus "$id")"
+		echo "memory=$(vm_get_memory "$id")"
+		for i in 1 2 3 4; do
+			nic_path="$(vm_state_path "$id").nic$i"
+			if [ -f "$nic_path" ]; then
+				echo "nic$i=\"$(cat "$nic_path")\""
+			fi
+			bridge_path="$(vm_state_path "$id").bridgeadapter$i"
+			if [ -f "$bridge_path" ]; then
+				echo "bridgeadapter$i=\"$(cat "$bridge_path")\""
+			fi
+		done
+	else
+		for i in 1 2 3 4; do
+			nic_path="$(vm_state_path "$id").nic$i"
+			if [ -f "$nic_path" ]; then
+				promisc_path="$(vm_state_path "$id").nicpromisc$i"
+				promisc="deny"
+				if [ -f "$promisc_path" ]; then
+					promisc="$(cat "$promisc_path")"
+				fi
+				echo "NIC $i: ... Promisc Policy: $promisc, ..."
+			fi
+		done
+	fi
 	exit 0
 	;;
 modifyvm)
@@ -100,6 +131,18 @@ modifyvm)
 			;;
 		--memory)
 			echo "$2" > "$(vm_state_path "$id").memory"
+			shift 2
+			;;
+		--nic1|--nic2|--nic3|--nic4)
+			echo "$2" > "$(vm_state_path "$id").${1#--}"
+			shift 2
+			;;
+		--nicpromisc1|--nicpromisc2|--nicpromisc3|--nicpromisc4)
+			echo "$2" > "$(vm_state_path "$id").${1#--}"
+			shift 2
+			;;
+		--bridgeadapter1|--bridgeadapter2|--bridgeadapter3|--bridgeadapter4)
+			echo "$2" > "$(vm_state_path "$id").${1#--}"
 			shift 2
 			;;
 		*)
@@ -181,6 +224,36 @@ func TestCreateVM(t *testing.T) {
 			t.Fatalf("CreateVM() error = %v, want ErrVMAlreadyExists", err)
 		}
 	})
+
+	t.Run("success with network adapters", func(t *testing.T) {
+		t.Parallel()
+
+		vm, err := client.CreateVM(ctx, "net-vm", CreateVMOptions{
+			NetworkAdapters: []NetworkAdapter{
+				{Type: NetworkTypeNAT, PromiscuousMode: PromiscuousModeDeny},
+				{
+					Type:            NetworkTypeBridged,
+					HostInterface:   "eth0",
+					PromiscuousMode: PromiscuousModeAllowAll,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateVM() error: %v", err)
+		}
+		if len(vm.NetworkAdapters) != 2 {
+			t.Fatalf("CreateVM() NetworkAdapters len = %d, want 2", len(vm.NetworkAdapters))
+		}
+		if vm.NetworkAdapters[0].Type != NetworkTypeNAT {
+			t.Fatalf("NetworkAdapters[0].Type = %q, want %q", vm.NetworkAdapters[0].Type, NetworkTypeNAT)
+		}
+		if vm.NetworkAdapters[1].Type != NetworkTypeBridged || vm.NetworkAdapters[1].HostInterface != "eth0" {
+			t.Fatalf("NetworkAdapters[1] = %+v, want bridged on eth0", vm.NetworkAdapters[1])
+		}
+		if vm.NetworkAdapters[1].PromiscuousMode != PromiscuousModeAllowAll {
+			t.Fatalf("NetworkAdapters[1].PromiscuousMode = %q, want %q", vm.NetworkAdapters[1].PromiscuousMode, PromiscuousModeAllowAll)
+		}
+	})
 }
 
 func TestGetVM(t *testing.T) {
@@ -219,6 +292,33 @@ func TestGetVM(t *testing.T) {
 		_, err := client.GetVM(ctx, "missing")
 		if !errors.Is(err, ErrVMNotFound) {
 			t.Fatalf("GetVM() error = %v, want ErrVMNotFound", err)
+		}
+	})
+
+	t.Run("returns network adapters", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := client.CreateVM(ctx, "get-net-vm", CreateVMOptions{
+			NetworkAdapters: []NetworkAdapter{
+				{Type: NetworkTypeNAT, PromiscuousMode: PromiscuousModeAllowVMs},
+			},
+		})
+		if err != nil {
+			t.Fatalf("CreateVM() error: %v", err)
+		}
+
+		vm, err := client.GetVM(ctx, "uuid-for-get-net-vm")
+		if err != nil {
+			t.Fatalf("GetVM() error: %v", err)
+		}
+		if len(vm.NetworkAdapters) != 1 {
+			t.Fatalf("GetVM() NetworkAdapters len = %d, want 1", len(vm.NetworkAdapters))
+		}
+		if vm.NetworkAdapters[0].Type != NetworkTypeNAT {
+			t.Fatalf("NetworkAdapters[0].Type = %q, want %q", vm.NetworkAdapters[0].Type, NetworkTypeNAT)
+		}
+		if vm.NetworkAdapters[0].PromiscuousMode != PromiscuousModeAllowVMs {
+			t.Fatalf("NetworkAdapters[0].PromiscuousMode = %q, want %q", vm.NetworkAdapters[0].PromiscuousMode, PromiscuousModeAllowVMs)
 		}
 	})
 }
@@ -305,6 +405,41 @@ func TestUpdateVM(t *testing.T) {
 		_, err := client.UpdateVM(ctx, "test-vm", UpdateVMOptions{})
 		if err == nil || !strings.Contains(err.Error(), "at least one VM setting must be provided") {
 			t.Fatalf("UpdateVM() error = %v, want no changes validation error", err)
+		}
+	})
+
+	t.Run("updates network adapters", func(t *testing.T) {
+		t.Parallel()
+
+		adapters := []NetworkAdapter{
+			{
+				Type:            NetworkTypeBridged,
+				HostInterface:   "wlan0",
+				PromiscuousMode: PromiscuousModeAllowAll,
+			},
+		}
+		vm, err := client.UpdateVM(ctx, "test-vm", UpdateVMOptions{NetworkAdapters: &adapters})
+		if err != nil {
+			t.Fatalf("UpdateVM() error: %v", err)
+		}
+		if len(vm.NetworkAdapters) != 1 {
+			t.Fatalf("UpdateVM() NetworkAdapters len = %d, want 1", len(vm.NetworkAdapters))
+		}
+		if vm.NetworkAdapters[0].Type != NetworkTypeBridged || vm.NetworkAdapters[0].HostInterface != "wlan0" {
+			t.Fatalf("NetworkAdapters[0] = %+v, want bridged on wlan0", vm.NetworkAdapters[0])
+		}
+		if vm.NetworkAdapters[0].PromiscuousMode != PromiscuousModeAllowAll {
+			t.Fatalf("NetworkAdapters[0].PromiscuousMode = %q, want %q", vm.NetworkAdapters[0].PromiscuousMode, PromiscuousModeAllowAll)
+		}
+	})
+
+	t.Run("invalid network adapter", func(t *testing.T) {
+		t.Parallel()
+
+		adapters := []NetworkAdapter{{Type: NetworkTypeBridged}}
+		_, err := client.UpdateVM(ctx, "test-vm", UpdateVMOptions{NetworkAdapters: &adapters})
+		if err == nil || !strings.Contains(err.Error(), "host_interface is required") {
+			t.Fatalf("UpdateVM() error = %v, want host_interface validation error", err)
 		}
 	})
 }
