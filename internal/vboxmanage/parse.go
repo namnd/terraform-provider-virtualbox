@@ -6,13 +6,16 @@ package vboxmanage
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
 var (
-	reCreateVMUUID        = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
-	reMachineReadableName = regexp.MustCompile(`(?m)^name="(.+)"$`)
-	reMachineReadableUUID = regexp.MustCompile(`(?m)^UUID="(.+)"$`)
+	reCreateVMUUID          = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
+	reMachineReadableName   = regexp.MustCompile(`(?m)^name="(.+)"$`)
+	reMachineReadableUUID   = regexp.MustCompile(`(?m)^UUID="(.+)"$`)
+	reMachineReadableMemory = regexp.MustCompile(`(?m)^memory=(\d+)$`)
+	reMachineReadableCPUs   = regexp.MustCompile(`(?m)^cpus=(\d+)$`)
 )
 
 func parseCreateVMOutput(name, stdout string) (*VM, error) {
@@ -35,6 +38,12 @@ func parseShowVMInfoOutput(stdout string) (*VM, error) {
 	}
 	if matches := reMachineReadableUUID.FindStringSubmatch(stdout); len(matches) == 2 {
 		vm.UUID = matches[1]
+	}
+	if matches := reMachineReadableMemory.FindStringSubmatch(stdout); len(matches) == 2 {
+		vm.Memory, _ = strconv.Atoi(matches[1])
+	}
+	if matches := reMachineReadableCPUs.FindStringSubmatch(stdout); len(matches) == 2 {
+		vm.CPUs, _ = strconv.Atoi(matches[1])
 	}
 
 	if vm.Name == "" || vm.UUID == "" {

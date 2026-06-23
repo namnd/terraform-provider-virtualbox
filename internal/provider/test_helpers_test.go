@@ -14,6 +14,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
+type vmTestAttributeValues struct {
+	Strings map[string]types.String
+	Int64s  map[string]types.Int64
+}
+
 func vmTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
@@ -27,7 +32,7 @@ func vmTestSchema(t *testing.T) schema.Schema {
 	return resp.Schema
 }
 
-func vmTestPlan(t *testing.T, schema schema.Schema, attrs map[string]types.String) tfsdk.Plan {
+func vmTestPlan(t *testing.T, schema schema.Schema, attrs vmTestAttributeValues) tfsdk.Plan {
 	t.Helper()
 
 	return tfsdk.Plan{
@@ -36,7 +41,7 @@ func vmTestPlan(t *testing.T, schema schema.Schema, attrs map[string]types.Strin
 	}
 }
 
-func vmTestState(t *testing.T, schema schema.Schema, attrs map[string]types.String) tfsdk.State {
+func vmTestState(t *testing.T, schema schema.Schema, attrs vmTestAttributeValues) tfsdk.State {
 	t.Helper()
 
 	return tfsdk.State{
@@ -45,7 +50,7 @@ func vmTestState(t *testing.T, schema schema.Schema, attrs map[string]types.Stri
 	}
 }
 
-func vmTestObjectValue(t *testing.T, s schema.Schema, attrs map[string]types.String) tftypes.Value {
+func vmTestObjectValue(t *testing.T, s schema.Schema, attrs vmTestAttributeValues) tftypes.Value {
 	t.Helper()
 
 	ctx := context.Background()
@@ -56,17 +61,25 @@ func vmTestObjectValue(t *testing.T, s schema.Schema, attrs map[string]types.Str
 	tfAttrs := make(map[string]tftypes.Value, len(objectType.AttributeTypes))
 
 	for name, attrType := range objectType.AttributeTypes {
-		value, ok := attrs[name]
-		if !ok {
-			tfAttrs[name] = tftypes.NewValue(attrType, nil)
+		if value, ok := attrs.Strings[name]; ok {
+			tfValue, err := value.ToTerraformValue(ctx)
+			if err != nil {
+				t.Fatalf("failed to convert string %q to terraform value: %v", name, err)
+			}
+			tfAttrs[name] = tfValue
 			continue
 		}
 
-		tfValue, err := value.ToTerraformValue(ctx)
-		if err != nil {
-			t.Fatalf("failed to convert %q to terraform value: %v", name, err)
+		if value, ok := attrs.Int64s[name]; ok {
+			tfValue, err := value.ToTerraformValue(ctx)
+			if err != nil {
+				t.Fatalf("failed to convert int64 %q to terraform value: %v", name, err)
+			}
+			tfAttrs[name] = tfValue
+			continue
 		}
-		tfAttrs[name] = tfValue
+
+		tfAttrs[name] = tftypes.NewValue(attrType, nil)
 	}
 
 	return tftypes.NewValue(objectType, tfAttrs)

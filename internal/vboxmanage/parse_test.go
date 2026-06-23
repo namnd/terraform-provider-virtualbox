@@ -60,6 +60,13 @@ func TestParseCreateVMOutput(t *testing.T) {
 	}
 }
 
+func vmEqual(got, want *VM) bool {
+	return got.Name == want.Name &&
+		got.UUID == want.UUID &&
+		got.CPUs == want.CPUs &&
+		got.Memory == want.Memory
+}
+
 func TestParseShowVMInfoOutput(t *testing.T) {
 	t.Parallel()
 
@@ -77,6 +84,20 @@ UUID="abc-def-123"
 			want: &VM{
 				Name: "test-vm",
 				UUID: "abc-def-123",
+			},
+		},
+		{
+			name: "parses cpus and memory",
+			stdout: `name="test-vm"
+UUID="abc-def-123"
+cpus=4
+memory=2048
+`,
+			want: &VM{
+				Name:   "test-vm",
+				UUID:   "abc-def-123",
+				CPUs:   4,
+				Memory: 2048,
 			},
 		},
 		{
@@ -109,7 +130,7 @@ UUID="abc-def-123"
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got.Name != tt.want.Name || got.UUID != tt.want.UUID {
+			if !vmEqual(got, tt.want) {
 				t.Fatalf("got %+v, want %+v", got, tt.want)
 			}
 		})

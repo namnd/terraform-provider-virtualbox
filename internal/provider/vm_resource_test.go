@@ -35,7 +35,7 @@ func (m *mockVirtualBox) CreateVM(ctx context.Context, name string, opts vboxman
 	if m.createVMFunc != nil {
 		return m.createVMFunc(ctx, name, opts)
 	}
-	return &vboxmanage.VM{Name: name, UUID: "uuid-" + name}, nil
+	return &vboxmanage.VM{Name: name, UUID: "uuid-" + name, CPUs: opts.CPUs, Memory: opts.Memory}, nil
 }
 
 func (m *mockVirtualBox) GetVM(ctx context.Context, id string) (*vboxmanage.VM, error) {
@@ -43,7 +43,7 @@ func (m *mockVirtualBox) GetVM(ctx context.Context, id string) (*vboxmanage.VM, 
 	if m.getVMFunc != nil {
 		return m.getVMFunc(ctx, id)
 	}
-	return &vboxmanage.VM{Name: "vm-" + id, UUID: id}, nil
+	return &vboxmanage.VM{Name: "vm-" + id, UUID: id, CPUs: 1, Memory: 1024}, nil
 }
 
 func (m *mockVirtualBox) UpdateVM(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error) {
@@ -51,7 +51,18 @@ func (m *mockVirtualBox) UpdateVM(ctx context.Context, id string, opts vboxmanag
 	if m.updateVMFunc != nil {
 		return m.updateVMFunc(ctx, id, opts)
 	}
-	return &vboxmanage.VM{Name: opts.Name, UUID: id}, nil
+
+	vm := &vboxmanage.VM{UUID: id, CPUs: 1, Memory: 1024}
+	if opts.Name != nil {
+		vm.Name = *opts.Name
+	}
+	if opts.CPUs != nil {
+		vm.CPUs = *opts.CPUs
+	}
+	if opts.Memory != nil {
+		vm.Memory = *opts.Memory
+	}
+	return vm, nil
 }
 
 func (m *mockVirtualBox) DeleteVM(ctx context.Context, id string) error {
@@ -143,15 +154,27 @@ func TestVMResourceCreate(t *testing.T) {
 				if opts.OSType != "Linux_64" {
 					t.Fatalf("CreateVM OSType = %q, want %q", opts.OSType, "Linux_64")
 				}
-				return &vboxmanage.VM{Name: name, UUID: "uuid-123"}, nil
+				if opts.CPUs != 2 {
+					t.Fatalf("CreateVM CPUs = %d, want 2", opts.CPUs)
+				}
+				if opts.Memory != 2048 {
+					t.Fatalf("CreateVM Memory = %d, want 2048", opts.Memory)
+				}
+				return &vboxmanage.VM{Name: name, UUID: "uuid-123", CPUs: 2, Memory: 2048}, nil
 			},
 		}
 		r := newTestVMResource(t, mock)
 
 		req := resource.CreateRequest{
-			Plan: vmTestPlan(t, schema, map[string]types.String{
-				"name":    types.StringValue("test-vm"),
-				"os_type": types.StringValue("Linux_64"),
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name":    types.StringValue("test-vm"),
+					"os_type": types.StringValue("Linux_64"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(2),
+					"memory": types.Int64Value(2048),
+				},
 			}),
 		}
 		resp := &resource.CreateResponse{State: tfsdk.State{Schema: schema}}
@@ -167,6 +190,12 @@ func TestVMResourceCreate(t *testing.T) {
 		}
 		if state.Name.ValueString() != "test-vm" {
 			t.Fatalf("state.Name = %q, want %q", state.Name.ValueString(), "test-vm")
+		}
+		if state.CPUs.ValueInt64() != 2 {
+			t.Fatalf("state.CPUs = %d, want 2", state.CPUs.ValueInt64())
+		}
+		if state.Memory.ValueInt64() != 2048 {
+			t.Fatalf("state.Memory = %d, want 2048", state.Memory.ValueInt64())
 		}
 		if state.LastUpdated.IsNull() || state.LastUpdated.IsUnknown() {
 			t.Fatal("expected last_updated to be set")
@@ -187,9 +216,15 @@ func TestVMResourceCreate(t *testing.T) {
 		r := newTestVMResource(t, mock)
 
 		req := resource.CreateRequest{
-			Plan: vmTestPlan(t, schema, map[string]types.String{
-				"name":    types.StringValue("test-vm"),
-				"os_type": types.StringValue("Linux_64"),
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name":    types.StringValue("test-vm"),
+					"os_type": types.StringValue("Linux_64"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
 			}),
 		}
 		resp := &resource.CreateResponse{State: tfsdk.State{Schema: schema}}
@@ -215,15 +250,21 @@ func TestVMResourceRead(t *testing.T) {
 				if id != "uuid-123" {
 					t.Fatalf("GetVM id = %q, want %q", id, "uuid-123")
 				}
-				return &vboxmanage.VM{Name: "updated-name", UUID: "uuid-123"}, nil
+				return &vboxmanage.VM{Name: "updated-name", UUID: "uuid-123", CPUs: 4, Memory: 4096}, nil
 			},
 		}
 		r := newTestVMResource(t, mock)
 
 		req := resource.ReadRequest{
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("old-name"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("old-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
 			}),
 		}
 		resp := &resource.ReadResponse{State: tfsdk.State{Schema: schema}}
@@ -240,6 +281,12 @@ func TestVMResourceRead(t *testing.T) {
 		if state.Name.ValueString() != "updated-name" {
 			t.Fatalf("state.Name = %q, want %q", state.Name.ValueString(), "updated-name")
 		}
+		if state.CPUs.ValueInt64() != 4 {
+			t.Fatalf("state.CPUs = %d, want 4", state.CPUs.ValueInt64())
+		}
+		if state.Memory.ValueInt64() != 4096 {
+			t.Fatalf("state.Memory = %d, want 4096", state.Memory.ValueInt64())
+		}
 	})
 
 	t.Run("vm not found removes resource", func(t *testing.T) {
@@ -253,9 +300,11 @@ func TestVMResourceRead(t *testing.T) {
 		r := newTestVMResource(t, mock)
 
 		req := resource.ReadRequest{
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("test-vm"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("test-vm"),
+				},
 			}),
 		}
 		resp := &resource.ReadResponse{State: tfsdk.State{Schema: schema}}
@@ -280,9 +329,11 @@ func TestVMResourceRead(t *testing.T) {
 		r := newTestVMResource(t, mock)
 
 		req := resource.ReadRequest{
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("test-vm"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("test-vm"),
+				},
 			}),
 		}
 		resp := &resource.ReadResponse{State: tfsdk.State{Schema: schema}}
@@ -308,21 +359,33 @@ func TestVMResourceUpdate(t *testing.T) {
 				if id != "uuid-123" {
 					t.Fatalf("UpdateVM id = %q, want %q", id, "uuid-123")
 				}
-				if opts.Name != "new-name" {
-					t.Fatalf("UpdateVM name = %q, want %q", opts.Name, "new-name")
+				if opts.Name == nil || *opts.Name != "new-name" {
+					t.Fatalf("UpdateVM name = %v, want %q", opts.Name, "new-name")
 				}
-				return &vboxmanage.VM{Name: "new-name", UUID: "uuid-123"}, nil
+				return &vboxmanage.VM{Name: "new-name", UUID: "uuid-123", CPUs: 1, Memory: 1024}, nil
 			},
 		}
 		r := newTestVMResource(t, mock)
 
 		req := resource.UpdateRequest{
-			Plan: vmTestPlan(t, schema, map[string]types.String{
-				"name": types.StringValue("new-name"),
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name": types.StringValue("new-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
 			}),
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("old-name"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("old-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
 			}),
 		}
 		resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schema}}
@@ -347,19 +410,90 @@ func TestVMResourceUpdate(t *testing.T) {
 		}
 	})
 
-	t.Run("skips update when name unchanged", func(t *testing.T) {
+	t.Run("updates cpus and memory", func(t *testing.T) {
+		t.Parallel()
+
+		mock := &mockVirtualBox{
+			updateVMFunc: func(_ context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error) {
+				if opts.CPUs == nil || *opts.CPUs != 4 {
+					t.Fatalf("UpdateVM CPUs = %v, want 4", opts.CPUs)
+				}
+				if opts.Memory == nil || *opts.Memory != 4096 {
+					t.Fatalf("UpdateVM Memory = %v, want 4096", opts.Memory)
+				}
+				if opts.Name != nil {
+					t.Fatal("expected name not to be updated")
+				}
+				return &vboxmanage.VM{Name: "same-name", UUID: id, CPUs: 4, Memory: 4096}, nil
+			},
+		}
+		r := newTestVMResource(t, mock)
+
+		req := resource.UpdateRequest{
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(4),
+					"memory": types.Int64Value(4096),
+				},
+			}),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
+			}),
+		}
+		resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schema}}
+
+		r.Update(ctx, req, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("Update diagnostics: %v", resp.Diagnostics)
+		}
+
+		state := vmGetStateModel(t, ctx, resp.State)
+		if state.CPUs.ValueInt64() != 4 {
+			t.Fatalf("state.CPUs = %d, want 4", state.CPUs.ValueInt64())
+		}
+		if state.Memory.ValueInt64() != 4096 {
+			t.Fatalf("state.Memory = %d, want 4096", state.Memory.ValueInt64())
+		}
+		if mock.updateVMCalls != 1 {
+			t.Fatalf("UpdateVM calls = %d, want 1", mock.updateVMCalls)
+		}
+	})
+
+	t.Run("skips update when unchanged", func(t *testing.T) {
 		t.Parallel()
 
 		mock := &mockVirtualBox{}
 		r := newTestVMResource(t, mock)
 
 		req := resource.UpdateRequest{
-			Plan: vmTestPlan(t, schema, map[string]types.String{
-				"name": types.StringValue("same-name"),
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(2),
+					"memory": types.Int64Value(2048),
+				},
 			}),
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("same-name"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("same-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(2),
+					"memory": types.Int64Value(2048),
+				},
 			}),
 		}
 		resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schema}}
@@ -384,12 +518,24 @@ func TestVMResourceUpdate(t *testing.T) {
 		r := newTestVMResource(t, mock)
 
 		req := resource.UpdateRequest{
-			Plan: vmTestPlan(t, schema, map[string]types.String{
-				"name": types.StringValue("new-name"),
+			Plan: vmTestPlan(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"name": types.StringValue("new-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
 			}),
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("old-name"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("old-name"),
+				},
+				Int64s: map[string]types.Int64{
+					"cpus":   types.Int64Value(1),
+					"memory": types.Int64Value(1024),
+				},
 			}),
 		}
 		resp := &resource.UpdateResponse{State: tfsdk.State{Schema: schema}}
@@ -421,9 +567,11 @@ func TestVMResourceDelete(t *testing.T) {
 		r := newTestVMResource(t, mock)
 
 		req := resource.DeleteRequest{
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("test-vm"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("test-vm"),
+				},
 			}),
 		}
 		resp := &resource.DeleteResponse{}
@@ -448,9 +596,11 @@ func TestVMResourceDelete(t *testing.T) {
 		r := newTestVMResource(t, mock)
 
 		req := resource.DeleteRequest{
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("test-vm"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("test-vm"),
+				},
 			}),
 		}
 		resp := &resource.DeleteResponse{}
@@ -472,9 +622,11 @@ func TestVMResourceDelete(t *testing.T) {
 		r := newTestVMResource(t, mock)
 
 		req := resource.DeleteRequest{
-			State: vmTestState(t, schema, map[string]types.String{
-				"id":   types.StringValue("uuid-123"),
-				"name": types.StringValue("test-vm"),
+			State: vmTestState(t, schema, vmTestAttributeValues{
+				Strings: map[string]types.String{
+					"id":   types.StringValue("uuid-123"),
+					"name": types.StringValue("test-vm"),
+				},
 			}),
 		}
 		resp := &resource.DeleteResponse{}

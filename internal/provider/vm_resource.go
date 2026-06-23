@@ -11,6 +11,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -37,6 +38,8 @@ type vmResourceModel struct {
 	ID          types.String `tfsdk:"id"`
 	Name        types.String `tfsdk:"name"`
 	OSType      types.String `tfsdk:"os_type"`
+	CPUs        types.Int64  `tfsdk:"cpus"`
+	Memory      types.Int64  `tfsdk:"memory"`
 	LastUpdated types.String `tfsdk:"last_updated"`
 }
 
@@ -89,6 +92,18 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
+			"cpus": schema.Int64Attribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Number of virtual CPUs.",
+				Default:             int64default.StaticInt64(1),
+			},
+			"memory": schema.Int64Attribute{
+				Optional:            true,
+				Computed:            true,
+				MarkdownDescription: "Memory in megabytes.",
+				Default:             int64default.StaticInt64(1024),
+			},
 		},
 	}
 }
@@ -104,6 +119,8 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 
 	vm, err := r.client.CreateVM(ctx, plan.Name.ValueString(), vboxmanage.CreateVMOptions{
 		OSType: plan.OSType.ValueString(),
+		CPUs:   int(plan.CPUs.ValueInt64()),
+		Memory: int(plan.Memory.ValueInt64()),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -114,6 +131,8 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	}
 
 	plan.ID = types.StringValue(vm.UUID)
+	plan.CPUs = types.Int64Value(int64(vm.CPUs))
+	plan.Memory = types.Int64Value(int64(vm.Memory))
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
 
 	diags = resp.State.Set(ctx, plan)
@@ -147,6 +166,8 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 
 	state.Name = types.StringValue(vm.Name)
 	state.ID = types.StringValue(vm.UUID)
+	state.CPUs = types.Int64Value(int64(vm.CPUs))
+	state.Memory = types.Int64Value(int64(vm.Memory))
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -173,10 +194,23 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		return
 	}
 
+	updateOpts := vboxmanage.UpdateVMOptions{}
+
 	if !plan.Name.Equal(state.Name) {
-		vm, err := r.client.UpdateVM(ctx, state.ID.ValueString(), vboxmanage.UpdateVMOptions{
-			Name: plan.Name.ValueString(),
-		})
+		name := plan.Name.ValueString()
+		updateOpts.Name = &name
+	}
+	if !plan.CPUs.Equal(state.CPUs) {
+		cpus := int(plan.CPUs.ValueInt64())
+		updateOpts.CPUs = &cpus
+	}
+	if !plan.Memory.Equal(state.Memory) {
+		memory := int(plan.Memory.ValueInt64())
+		updateOpts.Memory = &memory
+	}
+
+	if updateOpts.HasChanges() {
+		vm, err := r.client.UpdateVM(ctx, state.ID.ValueString(), updateOpts)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				"Error updating VM",
@@ -185,6 +219,8 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 			return
 		}
 		plan.Name = types.StringValue(vm.Name)
+		plan.CPUs = types.Int64Value(int64(vm.CPUs))
+		plan.Memory = types.Int64Value(int64(vm.Memory))
 	}
 
 	plan.ID = state.ID
