@@ -137,3 +137,86 @@ func vmGetStateModel(t *testing.T, ctx context.Context, state tfsdk.State) vmRes
 
 	return model
 }
+
+type diskTestAttributeValues struct {
+	Strings map[string]types.String
+	Int64s  map[string]types.Int64
+}
+
+func diskTestSchema(t *testing.T) schema.Schema {
+	t.Helper()
+
+	r := NewDiskResource()
+	resp := &resource.SchemaResponse{}
+	r.Schema(context.Background(), resource.SchemaRequest{}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("schema diagnostics: %v", resp.Diagnostics)
+	}
+
+	return resp.Schema
+}
+
+func diskTestPlan(t *testing.T, schema schema.Schema, attrs diskTestAttributeValues) tfsdk.Plan {
+	t.Helper()
+
+	return tfsdk.Plan{
+		Schema: schema,
+		Raw:    diskTestObjectValue(t, schema, attrs),
+	}
+}
+
+func diskTestState(t *testing.T, schema schema.Schema, attrs diskTestAttributeValues) tfsdk.State {
+	t.Helper()
+
+	return tfsdk.State{
+		Schema: schema,
+		Raw:    diskTestObjectValue(t, schema, attrs),
+	}
+}
+
+func diskTestObjectValue(t *testing.T, s schema.Schema, attrs diskTestAttributeValues) tftypes.Value {
+	t.Helper()
+
+	ctx := context.Background()
+	objectType, ok := s.Type().TerraformType(ctx).(tftypes.Object)
+	if !ok {
+		t.Fatalf("expected tftypes.Object, got %T", s.Type().TerraformType(ctx))
+	}
+	tfAttrs := make(map[string]tftypes.Value, len(objectType.AttributeTypes))
+
+	for name, attrType := range objectType.AttributeTypes {
+		if value, ok := attrs.Strings[name]; ok {
+			tfValue, err := value.ToTerraformValue(ctx)
+			if err != nil {
+				t.Fatalf("failed to convert string %q to terraform value: %v", name, err)
+			}
+			tfAttrs[name] = tfValue
+			continue
+		}
+
+		if value, ok := attrs.Int64s[name]; ok {
+			tfValue, err := value.ToTerraformValue(ctx)
+			if err != nil {
+				t.Fatalf("failed to convert int64 %q to terraform value: %v", name, err)
+			}
+			tfAttrs[name] = tfValue
+			continue
+		}
+
+		tfAttrs[name] = tftypes.NewValue(attrType, nil)
+	}
+
+	return tftypes.NewValue(objectType, tfAttrs)
+}
+
+func diskGetStateModel(t *testing.T, ctx context.Context, state tfsdk.State) diskResourceModel {
+	t.Helper()
+
+	var model diskResourceModel
+	diags := state.Get(ctx, &model)
+	if diags.HasError() {
+		t.Fatalf("state.Get diagnostics: %v", diags)
+	}
+
+	return model
+}
