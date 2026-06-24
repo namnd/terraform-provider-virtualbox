@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/namnd/terraform-provider-virtualbox/internal/vboxmanage"
 )
 
@@ -33,9 +32,7 @@ type VirtualboxProvider struct {
 }
 
 // VirtualboxProviderModel describes the provider data model.
-type VirtualboxProviderModel struct {
-	Endpoint types.String `tfsdk:"endpoint"`
-}
+type VirtualboxProviderModel struct{}
 
 func (p *VirtualboxProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
 	resp.TypeName = "virtualbox"
@@ -44,12 +41,7 @@ func (p *VirtualboxProvider) Metadata(ctx context.Context, req provider.Metadata
 
 func (p *VirtualboxProvider) Schema(ctx context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Attributes: map[string]schema.Attribute{
-			"endpoint": schema.StringAttribute{
-				MarkdownDescription: "Example provider attribute",
-				Optional:            true,
-			},
-		},
+		Attributes: map[string]schema.Attribute{},
 	}
 }
 
