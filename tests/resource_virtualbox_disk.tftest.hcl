@@ -4,6 +4,10 @@
 run "create_disk" {
   command = apply
 
+  variables {
+    file_path = "/tmp/tftest-disk-creation.vdi"
+  }
+
   module {
     source = "./examples/resources/virtualbox_disk/"
   }
@@ -14,7 +18,7 @@ run "create_disk" {
   }
 
   assert {
-    condition     = virtualbox_disk.disk.file_path == "/data/tftest-disk-creation.vdi"
+    condition     = virtualbox_disk.disk.file_path == var.file_path
     error_message = "The output Disk file_path is not correct."
   }
 

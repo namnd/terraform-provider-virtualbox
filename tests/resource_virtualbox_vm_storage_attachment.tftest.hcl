@@ -3,7 +3,7 @@
 
 variables {
   iso_path  = "/home/namnguyen/Downloads/metal-amd64-v1.11.1.iso"
-  file_path = "/data/tftest-storage-attachment.vdi"
+  file_path = "/tmp/tftest-storage-attachment.vdi"
 }
 
 run "setup_disk" {
