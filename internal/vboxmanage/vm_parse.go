@@ -21,6 +21,7 @@ var (
 	reMachineReadableStorageType      = regexp.MustCompile(`(?m)^storagecontrollertype(\d+)="(.+)"$`)
 	reMachineReadableStoragePortCount = regexp.MustCompile(`(?m)^storagecontrollerportcount(\d+)="(\d+)"$`)
 	reMachineReadableStorageBootable  = regexp.MustCompile(`(?m)^storagecontrollerbootable(\d+)="(on|off)"$`)
+	reMachineReadableStorageAttachKey = regexp.MustCompile(`^"(.+)"="(.*)"$`)
 	reNICPromiscPolicy                = regexp.MustCompile(`(?m)^NIC\s+(\d+):.*Promisc Policy:\s*([^,]+)`)
 	reVMState                         = regexp.MustCompile(`(?m)^VMState="(.+)"$`)
 )
@@ -209,6 +210,83 @@ func parseStorageControllers(stdout string) []StorageController {
 	}
 
 	return controllers
+}
+
+func parseStorageAttachments(stdout string) []StorageAttachment {
+	attachments := make([]StorageAttachment, 0)
+
+	for line := range strings.SplitSeq(stdout, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		match := reMachineReadableStorageAttachKey.FindStringSubmatch(line)
+		if len(match) != 3 {
+			continue
+		}
+
+		controllerName, port, device, ok := parseStorageAttachmentKey(match[1])
+		if !ok {
+			continue
+		}
+
+		medium := strings.TrimSpace(match[2])
+		if medium == "" || medium == StorageMediumNone || medium == StorageMediumEmptyDrive {
+			continue
+		}
+
+		attachments = append(attachments, StorageAttachment{
+			ControllerName: controllerName,
+			Port:           port,
+			Device:         device,
+			Type:           inferStorageAttachmentType(medium),
+			Medium:         medium,
+			MediumType:     StorageMediumTypeNormal,
+		})
+	}
+
+	return attachments
+}
+
+func parseStorageAttachmentKey(key string) (controllerName string, port, device int, ok bool) {
+	parts := strings.Split(key, "-")
+	if len(parts) < 3 {
+		return "", 0, 0, false
+	}
+
+	device, err := strconv.Atoi(parts[len(parts)-1])
+	if err != nil {
+		return "", 0, 0, false
+	}
+	port, err = strconv.Atoi(parts[len(parts)-2])
+	if err != nil {
+		return "", 0, 0, false
+	}
+
+	controllerParts := parts[:len(parts)-2]
+	if len(controllerParts) == 0 {
+		return "", 0, 0, false
+	}
+	if len(controllerParts) > 1 && isStorageAttachmentMetadataKey(controllerParts[len(controllerParts)-1]) {
+		return "", 0, 0, false
+	}
+
+	controllerName = strings.Join(controllerParts, "-")
+	if controllerName == "" {
+		return "", 0, 0, false
+	}
+
+	return controllerName, port, device, true
+}
+
+func isStorageAttachmentMetadataKey(segment string) bool {
+	switch segment {
+	case "ImageUUID", "tempeject", "IsEjected", "nonrotational", "discard", "hotpluggable", "bandwidthgroup":
+		return true
+	default:
+		return false
+	}
 }
 
 func parseMachineReadableValue(line string) string {

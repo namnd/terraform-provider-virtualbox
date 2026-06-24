@@ -6,9 +6,7 @@ terraform {
   }
 }
 
-provider "virtualbox" {
-  # example configuration here
-}
+provider "virtualbox" {}
 
 resource "virtualbox_disk" "disk" {
   file_path = var.file_path

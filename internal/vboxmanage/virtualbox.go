@@ -17,4 +17,8 @@ type VirtualBox interface {
 	GetDisk(ctx context.Context, id string) (*Disk, error)
 	UpdateDisk(ctx context.Context, id string, opts UpdateDiskOptions) (*Disk, error)
 	DeleteDisk(ctx context.Context, id string) error
+	CreateStorageAttachment(ctx context.Context, vmID string, opts CreateStorageAttachmentOptions) (*StorageAttachment, error)
+	GetStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) (*StorageAttachment, error)
+	UpdateStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int, opts UpdateStorageAttachmentOptions) (*StorageAttachment, error)
+	DeleteStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) error
 }

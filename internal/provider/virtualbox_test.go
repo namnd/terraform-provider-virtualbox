@@ -15,23 +15,31 @@ import (
 )
 
 type mockVirtualBox struct {
-	createVMCalls   int
-	updateVMCalls   int
-	deleteVMCalls   int
-	getVMCalls      int
-	createDiskCalls int
-	updateDiskCalls int
-	deleteDiskCalls int
-	getDiskCalls    int
+	createVMCalls                int
+	updateVMCalls                int
+	deleteVMCalls                int
+	getVMCalls                   int
+	createDiskCalls              int
+	updateDiskCalls              int
+	deleteDiskCalls              int
+	getDiskCalls                 int
+	createStorageAttachmentCalls int
+	updateStorageAttachmentCalls int
+	deleteStorageAttachmentCalls int
+	getStorageAttachmentCalls    int
 
-	createVMFunc   func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
-	getVMFunc      func(ctx context.Context, id string) (*vboxmanage.VM, error)
-	updateVMFunc   func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
-	deleteVMFunc   func(ctx context.Context, id string) error
-	createDiskFunc func(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error)
-	getDiskFunc    func(ctx context.Context, id string) (*vboxmanage.Disk, error)
-	updateDiskFunc func(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error)
-	deleteDiskFunc func(ctx context.Context, id string) error
+	createVMFunc                func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
+	getVMFunc                   func(ctx context.Context, id string) (*vboxmanage.VM, error)
+	updateVMFunc                func(ctx context.Context, id string, opts vboxmanage.UpdateVMOptions) (*vboxmanage.VM, error)
+	deleteVMFunc                func(ctx context.Context, id string) error
+	createDiskFunc              func(ctx context.Context, opts vboxmanage.CreateDiskOptions) (*vboxmanage.Disk, error)
+	getDiskFunc                 func(ctx context.Context, id string) (*vboxmanage.Disk, error)
+	updateDiskFunc              func(ctx context.Context, id string, opts vboxmanage.UpdateDiskOptions) (*vboxmanage.Disk, error)
+	deleteDiskFunc              func(ctx context.Context, id string) error
+	createStorageAttachmentFunc func(ctx context.Context, vmID string, opts vboxmanage.CreateStorageAttachmentOptions) (*vboxmanage.StorageAttachment, error)
+	getStorageAttachmentFunc    func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageAttachment, error)
+	updateStorageAttachmentFunc func(ctx context.Context, vmID, controllerName string, port, device int, opts vboxmanage.UpdateStorageAttachmentOptions) (*vboxmanage.StorageAttachment, error)
+	deleteStorageAttachmentFunc func(ctx context.Context, vmID, controllerName string, port, device int) error
 }
 
 func (m *mockVirtualBox) Version(context.Context) (string, error) {
@@ -141,6 +149,72 @@ func (m *mockVirtualBox) DeleteDisk(ctx context.Context, id string) error {
 	m.deleteDiskCalls++
 	if m.deleteDiskFunc != nil {
 		return m.deleteDiskFunc(ctx, id)
+	}
+	return nil
+}
+
+func (m *mockVirtualBox) CreateStorageAttachment(ctx context.Context, vmID string, opts vboxmanage.CreateStorageAttachmentOptions) (*vboxmanage.StorageAttachment, error) {
+	m.createStorageAttachmentCalls++
+	if m.createStorageAttachmentFunc != nil {
+		return m.createStorageAttachmentFunc(ctx, vmID, opts)
+	}
+	return &vboxmanage.StorageAttachment{
+		VMID:           vmID,
+		ControllerName: opts.ControllerName,
+		Port:           opts.Port,
+		Device:         opts.Device,
+		Type:           vboxmanage.NormalizeStorageAttachmentType(opts.Type),
+		Medium:         opts.Medium,
+		MediumType:     vboxmanage.NormalizeStorageMediumType(opts.MediumType),
+	}, nil
+}
+
+func (m *mockVirtualBox) GetStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageAttachment, error) {
+	m.getStorageAttachmentCalls++
+	if m.getStorageAttachmentFunc != nil {
+		return m.getStorageAttachmentFunc(ctx, vmID, controllerName, port, device)
+	}
+	return &vboxmanage.StorageAttachment{
+		VMID:           vmID,
+		ControllerName: controllerName,
+		Port:           port,
+		Device:         device,
+		Type:           vboxmanage.StorageAttachmentTypeHDD,
+		Medium:         "/data/boot.vdi",
+		MediumType:     vboxmanage.StorageMediumTypeNormal,
+	}, nil
+}
+
+func (m *mockVirtualBox) UpdateStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int, opts vboxmanage.UpdateStorageAttachmentOptions) (*vboxmanage.StorageAttachment, error) {
+	m.updateStorageAttachmentCalls++
+	if m.updateStorageAttachmentFunc != nil {
+		return m.updateStorageAttachmentFunc(ctx, vmID, controllerName, port, device, opts)
+	}
+	attachment := &vboxmanage.StorageAttachment{
+		VMID:           vmID,
+		ControllerName: controllerName,
+		Port:           port,
+		Device:         device,
+		Type:           vboxmanage.StorageAttachmentTypeHDD,
+		Medium:         "/data/boot.vdi",
+		MediumType:     vboxmanage.StorageMediumTypeNormal,
+	}
+	if opts.Medium != nil {
+		attachment.Medium = *opts.Medium
+	}
+	if opts.Type != nil {
+		attachment.Type = *opts.Type
+	}
+	if opts.MediumType != nil {
+		attachment.MediumType = *opts.MediumType
+	}
+	return attachment, nil
+}
+
+func (m *mockVirtualBox) DeleteStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) error {
+	m.deleteStorageAttachmentCalls++
+	if m.deleteStorageAttachmentFunc != nil {
+		return m.deleteStorageAttachmentFunc(ctx, vmID, controllerName, port, device)
 	}
 	return nil
 }
