@@ -115,11 +115,16 @@ func vmTestNetworkAdapterListValue(t *testing.T, listType tftypes.Type, adapters
 		if err != nil {
 			t.Fatalf("failed to convert network adapter promiscuous_mode to terraform value: %v", err)
 		}
+		macVal, err := adapter.MACAddress.ToTerraformValue(ctx)
+		if err != nil {
+			t.Fatalf("failed to convert network adapter mac_address to terraform value: %v", err)
+		}
 
 		elements[i] = tftypes.NewValue(list.ElementType, map[string]tftypes.Value{
 			"type":             typeVal,
 			"host_interface":   hostIfaceVal,
 			"promiscuous_mode": promiscVal,
+			"mac_address":      macVal,
 		})
 	}
 

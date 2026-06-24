@@ -213,6 +213,10 @@ showvminfo)
 			if [ -f "$bridge_path" ]; then
 				echo "bridgeadapter$i=\"$(cat "$bridge_path")\""
 			fi
+			mac_path="$(vm_state_path "$id").macaddress$i"
+			if [ -f "$mac_path" ]; then
+				echo "macaddress$i=\"$(cat "$mac_path")\""
+			fi
 		done
 		indices_file="$(storage_indices_path "$id")"
 		if [ -f "$indices_file" ]; then
@@ -269,7 +273,14 @@ modifyvm)
 			shift 2
 			;;
 		--nic1|--nic2|--nic3|--nic4)
-			echo "$2" > "$(vm_state_path "$id").${1#--}"
+			nic_slot="${1#--nic}"
+			echo "$2" > "$(vm_state_path "$id").nic$nic_slot"
+			mac_path="$(vm_state_path "$id").macaddress$nic_slot"
+			if [ "$2" != "none" ]; then
+				printf '080027%06X' "$nic_slot" > "$mac_path"
+			else
+				rm -f "$mac_path"
+			fi
 			shift 2
 			;;
 		--nicpromisc1|--nicpromisc2|--nicpromisc3|--nicpromisc4)
@@ -522,6 +533,12 @@ func TestCreateVM(t *testing.T) {
 		if vm.NetworkAdapters[1].PromiscuousMode != PromiscuousModeAllowAll {
 			t.Fatalf("NetworkAdapters[1].PromiscuousMode = %q, want %q", vm.NetworkAdapters[1].PromiscuousMode, PromiscuousModeAllowAll)
 		}
+		if vm.NetworkAdapters[0].MACAddress != "08:00:27:00:00:01" {
+			t.Fatalf("NetworkAdapters[0].MACAddress = %q, want %q", vm.NetworkAdapters[0].MACAddress, "08:00:27:00:00:01")
+		}
+		if vm.NetworkAdapters[1].MACAddress != "08:00:27:00:00:02" {
+			t.Fatalf("NetworkAdapters[1].MACAddress = %q, want %q", vm.NetworkAdapters[1].MACAddress, "08:00:27:00:00:02")
+		}
 	})
 }
 
@@ -588,6 +605,9 @@ func TestGetVM(t *testing.T) {
 		}
 		if vm.NetworkAdapters[0].PromiscuousMode != PromiscuousModeAllowVMs {
 			t.Fatalf("NetworkAdapters[0].PromiscuousMode = %q, want %q", vm.NetworkAdapters[0].PromiscuousMode, PromiscuousModeAllowVMs)
+		}
+		if vm.NetworkAdapters[0].MACAddress != "08:00:27:00:00:01" {
+			t.Fatalf("NetworkAdapters[0].MACAddress = %q, want %q", vm.NetworkAdapters[0].MACAddress, "08:00:27:00:00:01")
 		}
 	})
 }

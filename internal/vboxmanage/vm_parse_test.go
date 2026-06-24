@@ -132,19 +132,26 @@ memory=2048
 			stdout: `name="test-vm"
 UUID="abc-def-123"
 nic1="nat"
+macaddress1="080027000001"
 nic2="bridged"
 bridgeadapter2="eth0"
+macaddress2="080027EEA5E7"
 nic3="none"
 `,
 			want: &VM{
 				Name: "test-vm",
 				UUID: "abc-def-123",
 				NetworkAdapters: []NetworkAdapter{
-					{Type: NetworkTypeNAT, PromiscuousMode: PromiscuousModeDeny},
+					{
+						Type:            NetworkTypeNAT,
+						PromiscuousMode: PromiscuousModeDeny,
+						MACAddress:      "08:00:27:00:00:01",
+					},
 					{
 						Type:            NetworkTypeBridged,
 						HostInterface:   "eth0",
 						PromiscuousMode: PromiscuousModeDeny,
+						MACAddress:      "08:00:27:EE:A5:E7",
 					},
 				},
 			},
@@ -212,18 +219,25 @@ func TestParseNetworkAdapters(t *testing.T) {
 	t.Parallel()
 
 	stdout := `nic1="nat"
+macaddress1="080027000001"
 nic2="bridged"
 bridgeadapter2="wlan0"
+macaddress2="080027EEA5E7"
 nic3="none"
 nic4=""
 `
 	got := parseNetworkAdapters(stdout)
 	want := []NetworkAdapter{
-		{Type: NetworkTypeNAT, PromiscuousMode: PromiscuousModeDeny},
+		{
+			Type:            NetworkTypeNAT,
+			PromiscuousMode: PromiscuousModeDeny,
+			MACAddress:      "08:00:27:00:00:01",
+		},
 		{
 			Type:            NetworkTypeBridged,
 			HostInterface:   "wlan0",
 			PromiscuousMode: PromiscuousModeDeny,
+			MACAddress:      "08:00:27:EE:A5:E7",
 		},
 	}
 	if len(got) != len(want) {

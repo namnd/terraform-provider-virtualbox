@@ -20,6 +20,7 @@ func networkAdaptersFromModel(models []networkAdapterModel) ([]vboxmanage.Networ
 			Type:            model.Type.ValueString(),
 			HostInterface:   model.HostInterface.ValueString(),
 			PromiscuousMode: model.PromiscuousMode.ValueString(),
+			MACAddress:      model.MACAddress.ValueString(),
 		}
 		if err := vboxmanage.ValidateNetworkAdapter(adapter); err != nil {
 			diags.AddError(
@@ -40,6 +41,11 @@ func networkAdaptersToModel(adapters []vboxmanage.NetworkAdapter) []networkAdapt
 		models[i] = networkAdapterModel{
 			Type:            types.StringValue(adapter.Type),
 			PromiscuousMode: types.StringValue(vboxmanage.NormalizePromiscuousMode(adapter.PromiscuousMode)),
+		}
+		if adapter.MACAddress != "" {
+			models[i].MACAddress = types.StringValue(adapter.MACAddress)
+		} else {
+			models[i].MACAddress = types.StringNull()
 		}
 		if adapter.HostInterface != "" {
 			models[i].HostInterface = types.StringValue(adapter.HostInterface)

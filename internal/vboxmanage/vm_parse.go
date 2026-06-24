@@ -75,6 +75,7 @@ func parseShowVMInfoOutput(stdout string) (*VM, error) {
 func parseNetworkAdapters(stdout string) []NetworkAdapter {
 	nicTypes := make(map[int]string, maxNetworkAdapters)
 	bridgeAdapters := make(map[int]string, maxNetworkAdapters)
+	macAddresses := make(map[int]string, maxNetworkAdapters)
 
 	for line := range strings.SplitSeq(stdout, "\n") {
 		line = strings.TrimSpace(line)
@@ -84,6 +85,9 @@ func parseNetworkAdapters(stdout string) []NetworkAdapter {
 			}
 			if strings.HasPrefix(line, "bridgeadapter"+strconv.Itoa(i)+"=") {
 				bridgeAdapters[i] = parseMachineReadableValue(line)
+			}
+			if strings.HasPrefix(line, "macaddress"+strconv.Itoa(i)+"=") {
+				macAddresses[i] = FormatMACAddress(parseMachineReadableValue(line))
 			}
 		}
 	}
@@ -98,6 +102,7 @@ func parseNetworkAdapters(stdout string) []NetworkAdapter {
 			Type:            nicType,
 			HostInterface:   bridgeAdapters[i],
 			PromiscuousMode: PromiscuousModeDeny,
+			MACAddress:      macAddresses[i],
 		})
 	}
 

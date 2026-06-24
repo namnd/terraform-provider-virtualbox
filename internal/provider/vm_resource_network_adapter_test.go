@@ -136,6 +136,23 @@ func TestNetworkAdaptersToModel(t *testing.T) {
 		if models[0].PromiscuousMode.ValueString() != "deny" {
 			t.Fatalf("models[0].PromiscuousMode = %q, want %q", models[0].PromiscuousMode.ValueString(), "deny")
 		}
+		if !models[0].MACAddress.IsNull() {
+			t.Fatal("expected mac_address to be null when adapter has no MAC")
+		}
+	})
+
+	t.Run("adapter with mac address", func(t *testing.T) {
+		t.Parallel()
+
+		models := networkAdaptersToModel([]vboxmanage.NetworkAdapter{
+			{
+				Type:       "nat",
+				MACAddress: "08:00:27:EE:A5:E7",
+			},
+		})
+		if models[0].MACAddress.ValueString() != "08:00:27:EE:A5:E7" {
+			t.Fatalf("models[0].MACAddress = %q, want %q", models[0].MACAddress.ValueString(), "08:00:27:EE:A5:E7")
+		}
 	})
 
 	t.Run("bridged adapter with host interface", func(t *testing.T) {
@@ -243,6 +260,22 @@ func TestNetworkAdaptersModelEqual(t *testing.T) {
 		}
 		if networkAdaptersModelEqual(base[:1], other) {
 			t.Fatal("expected adapters with different promiscuous modes to be unequal")
+		}
+	})
+
+	t.Run("ignores mac address differences", func(t *testing.T) {
+		t.Parallel()
+
+		other := []networkAdapterModel{
+			{
+				Type:            types.StringValue("nat"),
+				HostInterface:   types.StringNull(),
+				PromiscuousMode: types.StringValue("deny"),
+				MACAddress:      types.StringValue("08:00:27:EE:A5:E7"),
+			},
+		}
+		if !networkAdaptersModelEqual(base[:1], other) {
+			t.Fatal("expected mac_address differences to be ignored when comparing adapters")
 		}
 	})
 }

@@ -601,11 +601,12 @@ func TestVMResourceRead(t *testing.T) {
 					CPUs:   1,
 					Memory: 1024,
 					NetworkAdapters: []vboxmanage.NetworkAdapter{
-						{Type: "nat"},
+						{Type: "nat", MACAddress: "08:00:27:00:00:01"},
 						{
 							Type:            "bridged",
 							HostInterface:   "wlan0",
 							PromiscuousMode: "allow-vms",
+							MACAddress:      "08:00:27:EE:A5:E7",
 						},
 					},
 				}, nil
@@ -640,6 +641,12 @@ func TestVMResourceRead(t *testing.T) {
 		}
 		if state.NetworkAdapters[1].PromiscuousMode.ValueString() != "allow-vms" {
 			t.Fatalf("state.NetworkAdapters[1].PromiscuousMode = %q, want %q", state.NetworkAdapters[1].PromiscuousMode.ValueString(), "allow-vms")
+		}
+		if state.NetworkAdapters[0].MACAddress.ValueString() != "08:00:27:00:00:01" {
+			t.Fatalf("state.NetworkAdapters[0].MACAddress = %q, want %q", state.NetworkAdapters[0].MACAddress.ValueString(), "08:00:27:00:00:01")
+		}
+		if state.NetworkAdapters[1].MACAddress.ValueString() != "08:00:27:EE:A5:E7" {
+			t.Fatalf("state.NetworkAdapters[1].MACAddress = %q, want %q", state.NetworkAdapters[1].MACAddress.ValueString(), "08:00:27:EE:A5:E7")
 		}
 	})
 }
