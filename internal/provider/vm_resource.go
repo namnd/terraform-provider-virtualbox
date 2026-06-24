@@ -11,6 +11,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64default"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -40,14 +41,24 @@ type networkAdapterModel struct {
 	PromiscuousMode types.String `tfsdk:"promiscuous_mode"`
 }
 
+type storageControllerModel struct {
+	Name        types.String `tfsdk:"name"`
+	Type        types.String `tfsdk:"type"`
+	Controller  types.String `tfsdk:"controller"`
+	Bootable    types.Bool   `tfsdk:"bootable"`
+	HostIOCache types.Bool   `tfsdk:"host_io_cache"`
+	PortCount   types.Int64  `tfsdk:"port_count"`
+}
+
 type vmResourceModel struct {
-	ID              types.String          `tfsdk:"id"`
-	Name            types.String          `tfsdk:"name"`
-	OSType          types.String          `tfsdk:"os_type"`
-	CPUs            types.Int64           `tfsdk:"cpus"`
-	Memory          types.Int64           `tfsdk:"memory"`
-	NetworkAdapters []networkAdapterModel `tfsdk:"network_adapter"`
-	LastUpdated     types.String          `tfsdk:"last_updated"`
+	ID                 types.String             `tfsdk:"id"`
+	Name               types.String             `tfsdk:"name"`
+	OSType             types.String             `tfsdk:"os_type"`
+	CPUs               types.Int64              `tfsdk:"cpus"`
+	Memory             types.Int64              `tfsdk:"memory"`
+	NetworkAdapters    []networkAdapterModel    `tfsdk:"network_adapter"`
+	StorageControllers []storageControllerModel `tfsdk:"storage_controller"`
+	LastUpdated        types.String             `tfsdk:"last_updated"`
 }
 
 // Metadata returns the resource type name.
@@ -134,6 +145,43 @@ func (r *vmResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *r
 					},
 				},
 			},
+			"storage_controller": schema.ListNestedBlock{
+				MarkdownDescription: "Storage controller configuration.",
+				NestedObject: schema.NestedBlockObject{
+					Attributes: map[string]schema.Attribute{
+						"name": schema.StringAttribute{
+							Required:            true,
+							MarkdownDescription: "Storage controller name.",
+						},
+						"type": schema.StringAttribute{
+							Required:            true,
+							MarkdownDescription: "Storage bus type. Must be one of: `floppy`, `ide`, `pcie`, `sas`, `sata`, `scsi`, `usb`.",
+						},
+						"controller": schema.StringAttribute{
+							Optional:            true,
+							Computed:            true,
+							MarkdownDescription: "Storage controller chip type. Must be one of: `BusLogic`, `I82078`, `ICH6`, `IntelAHCI`, `LSILogic`, `LSILogicSAS`, `NVMe`, `PIIX3`, `PIIX4`, `USB`, `VirtIO`.",
+						},
+						"bootable": schema.BoolAttribute{
+							Optional:            true,
+							Computed:            true,
+							MarkdownDescription: "Whether the controller is bootable.",
+							Default:             booldefault.StaticBool(true),
+						},
+						"host_io_cache": schema.BoolAttribute{
+							Optional:            true,
+							Computed:            true,
+							MarkdownDescription: "Whether to use the host I/O cache.",
+							Default:             booldefault.StaticBool(false),
+						},
+						"port_count": schema.Int64Attribute{
+							Optional:            true,
+							Computed:            true,
+							MarkdownDescription: "Number of ports on the storage controller.",
+						},
+					},
+				},
+			},
 		},
 	}
 }
@@ -153,11 +201,18 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 		return
 	}
 
+	storageControllers, diags := storageControllersFromModel(plan.StorageControllers)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	vm, err := r.client.CreateVM(ctx, plan.Name.ValueString(), vboxmanage.CreateVMOptions{
-		OSType:          plan.OSType.ValueString(),
-		CPUs:            int(plan.CPUs.ValueInt64()),
-		Memory:          int(plan.Memory.ValueInt64()),
-		NetworkAdapters: networkAdapters,
+		OSType:             plan.OSType.ValueString(),
+		CPUs:               int(plan.CPUs.ValueInt64()),
+		Memory:             int(plan.Memory.ValueInt64()),
+		NetworkAdapters:    networkAdapters,
+		StorageControllers: storageControllers,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -171,6 +226,7 @@ func (r *vmResource) Create(ctx context.Context, req resource.CreateRequest, res
 	plan.CPUs = types.Int64Value(int64(vm.CPUs))
 	plan.Memory = types.Int64Value(int64(vm.Memory))
 	plan.NetworkAdapters = networkAdaptersToModel(vm.NetworkAdapters)
+	plan.StorageControllers = storageControllersToModel(vm.StorageControllers)
 	plan.LastUpdated = types.StringValue(time.Now().Format(time.RFC850))
 
 	diags = resp.State.Set(ctx, plan)
@@ -207,6 +263,7 @@ func (r *vmResource) Read(ctx context.Context, req resource.ReadRequest, resp *r
 	state.CPUs = types.Int64Value(int64(vm.CPUs))
 	state.Memory = types.Int64Value(int64(vm.Memory))
 	state.NetworkAdapters = networkAdaptersToModel(vm.NetworkAdapters)
+	state.StorageControllers = storageControllersToModel(vm.StorageControllers)
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
@@ -255,6 +312,14 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		}
 		updateOpts.NetworkAdapters = &networkAdapters
 	}
+	if !storageControllersModelEqual(plan.StorageControllers, state.StorageControllers) {
+		storageControllers, diags := storageControllersFromModel(plan.StorageControllers)
+		resp.Diagnostics.Append(diags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		updateOpts.StorageControllers = &storageControllers
+	}
 
 	if updateOpts.HasChanges() {
 		vm, err := r.client.UpdateVM(ctx, state.ID.ValueString(), updateOpts)
@@ -269,6 +334,7 @@ func (r *vmResource) Update(ctx context.Context, req resource.UpdateRequest, res
 		plan.CPUs = types.Int64Value(int64(vm.CPUs))
 		plan.Memory = types.Int64Value(int64(vm.Memory))
 		plan.NetworkAdapters = networkAdaptersToModel(vm.NetworkAdapters)
+		plan.StorageControllers = storageControllersToModel(vm.StorageControllers)
 	}
 
 	plan.ID = state.ID

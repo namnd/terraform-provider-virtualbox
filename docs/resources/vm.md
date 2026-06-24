@@ -25,6 +25,7 @@ description: |-
 - `memory` (Number) Memory in megabytes.
 - `network_adapter` (Block List) Network adapter configuration. (see [below for nested schema](#nestedblock--network_adapter))
 - `os_type` (String) VirtualBox guest OS type identifier (for example, `Linux_64`).
+- `storage_controller` (Block List) Storage controller configuration. (see [below for nested schema](#nestedblock--storage_controller))
 
 ### Read-Only
 
@@ -42,3 +43,19 @@ Optional:
 
 - `host_interface` (String) Host network interface name. Required when `type` is `bridged`.
 - `promiscuous_mode` (String) Promiscuous mode. Must be one of: `deny`, `allow-vms`, `allow-all`.
+
+
+<a id="nestedblock--storage_controller"></a>
+### Nested Schema for `storage_controller`
+
+Required:
+
+- `name` (String) Storage controller name.
+- `type` (String) Storage bus type. Must be one of: `floppy`, `ide`, `pcie`, `sas`, `sata`, `scsi`, `usb`.
+
+Optional:
+
+- `bootable` (Boolean) Whether the controller is bootable.
+- `controller` (String) Storage controller chip type. Must be one of: `BusLogic`, `I82078`, `ICH6`, `IntelAHCI`, `LSILogic`, `LSILogicSAS`, `NVMe`, `PIIX3`, `PIIX4`, `USB`, `VirtIO`.
+- `host_io_cache` (Boolean) Whether to use the host I/O cache.
+- `port_count` (Number) Number of ports on the storage controller.

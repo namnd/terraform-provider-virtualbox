@@ -26,3 +26,15 @@ variable "network_adapters" {
   }))
   default = []
 }
+
+variable "storage_controller" {
+  type = list(object({
+    name          = string
+    type          = string
+    controller    = string
+    bootable      = optional(bool)
+    host_io_cache = optional(bool)
+    port_count    = optional(number)
+  }))
+  default = []
+}

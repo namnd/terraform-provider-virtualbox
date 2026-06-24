@@ -11,13 +11,18 @@ import (
 )
 
 var (
-	reCreateVMUUID          = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
-	reMachineReadableName   = regexp.MustCompile(`(?m)^name="(.+)"$`)
-	reMachineReadableUUID   = regexp.MustCompile(`(?m)^UUID="(.+)"$`)
-	reMachineReadableMemory = regexp.MustCompile(`(?m)^memory=(\d+)$`)
-	reMachineReadableCPUs   = regexp.MustCompile(`(?m)^cpus=(\d+)$`)
-	reNICPromiscPolicy      = regexp.MustCompile(`(?m)^NIC\s+(\d+):.*Promisc Policy:\s*([^,]+)`)
-	reVMState               = regexp.MustCompile(`(?m)^VMState="(.+)"$`)
+	reCreateVMUUID                    = regexp.MustCompile(`(?m)^UUID:\s+(.+)$`)
+	reMachineReadableName             = regexp.MustCompile(`(?m)^name="(.+)"$`)
+	reMachineReadableUUID             = regexp.MustCompile(`(?m)^UUID="(.+)"$`)
+	reMachineReadableMemory           = regexp.MustCompile(`(?m)^memory=(\d+)$`)
+	reMachineReadableCPUs             = regexp.MustCompile(`(?m)^cpus=(\d+)$`)
+	reMachineReadableCfgFile          = regexp.MustCompile(`(?m)^CfgFile="(.+)"$`)
+	reMachineReadableStorageName      = regexp.MustCompile(`(?m)^storagecontrollername(\d+)="(.+)"$`)
+	reMachineReadableStorageType      = regexp.MustCompile(`(?m)^storagecontrollertype(\d+)="(.+)"$`)
+	reMachineReadableStoragePortCount = regexp.MustCompile(`(?m)^storagecontrollerportcount(\d+)="(\d+)"$`)
+	reMachineReadableStorageBootable  = regexp.MustCompile(`(?m)^storagecontrollerbootable(\d+)="(on|off)"$`)
+	reNICPromiscPolicy                = regexp.MustCompile(`(?m)^NIC\s+(\d+):.*Promisc Policy:\s*([^,]+)`)
+	reVMState                         = regexp.MustCompile(`(?m)^VMState="(.+)"$`)
 )
 
 func parseVMState(stdout string) string {
@@ -56,6 +61,8 @@ func parseShowVMInfoOutput(stdout string) (*VM, error) {
 		vm.CPUs, _ = strconv.Atoi(matches[1])
 	}
 	vm.NetworkAdapters = parseNetworkAdapters(stdout)
+	vm.StorageControllers = parseStorageControllers(stdout)
+	applyStorageControllerHostIOCache(vm, parseCfgFile(stdout))
 
 	if vm.Name == "" || vm.UUID == "" {
 		return nil, fmt.Errorf("showvminfo succeeded but name or UUID was not found in output: %s", strings.TrimSpace(stdout))
@@ -119,6 +126,89 @@ func applyPromiscuousModes(vm *VM, stdout string) {
 			vm.NetworkAdapters[i].PromiscuousMode = mode
 		}
 	}
+}
+
+func parseCfgFile(stdout string) string {
+	matches := reMachineReadableCfgFile.FindStringSubmatch(stdout)
+	if len(matches) == 2 {
+		return matches[1]
+	}
+	return ""
+}
+
+func parseStorageControllers(stdout string) []StorageController {
+	names := make(map[int]string)
+	chips := make(map[int]string)
+	portCounts := make(map[int]int)
+	bootables := make(map[int]string)
+
+	for _, match := range reMachineReadableStorageName.FindAllStringSubmatch(stdout, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		idx, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		names[idx] = match[2]
+	}
+	for _, match := range reMachineReadableStorageType.FindAllStringSubmatch(stdout, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		idx, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		chips[idx] = match[2]
+	}
+	for _, match := range reMachineReadableStoragePortCount.FindAllStringSubmatch(stdout, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		idx, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		portCounts[idx], _ = strconv.Atoi(match[2])
+	}
+	for _, match := range reMachineReadableStorageBootable.FindAllStringSubmatch(stdout, -1) {
+		if len(match) != 3 {
+			continue
+		}
+		idx, err := strconv.Atoi(match[1])
+		if err != nil {
+			continue
+		}
+		bootables[idx] = match[2]
+	}
+
+	maxIdx := -1
+	for idx := range names {
+		if idx > maxIdx {
+			maxIdx = idx
+		}
+	}
+
+	controllers := make([]StorageController, 0, len(names))
+	for i := 0; i <= maxIdx; i++ {
+		name, ok := names[i]
+		if !ok {
+			continue
+		}
+
+		chip := NormalizeStorageControllerChip(chips[i])
+		controller := StorageController{
+			Name:       name,
+			Type:       BusTypeFromChip(chip),
+			Controller: chip,
+			Bootable:   NormalizeStorageBootable(bootables[i]),
+			PortCount:  portCounts[i],
+		}
+		controllers = append(controllers, controller)
+	}
+
+	return controllers
 }
 
 func parseMachineReadableValue(line string) string {

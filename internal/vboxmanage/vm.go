@@ -18,29 +18,32 @@ const (
 )
 
 type VM struct {
-	Name            string
-	UUID            string
-	CPUs            int
-	Memory          int
-	NetworkAdapters []NetworkAdapter
+	Name               string
+	UUID               string
+	CPUs               int
+	Memory             int
+	NetworkAdapters    []NetworkAdapter
+	StorageControllers []StorageController
 }
 
 type CreateVMOptions struct {
-	BaseFolder      string
-	OSType          string
-	Groups          string
-	CPUs            int
-	Memory          int
-	NetworkAdapters []NetworkAdapter
+	BaseFolder         string
+	OSType             string
+	Groups             string
+	CPUs               int
+	Memory             int
+	NetworkAdapters    []NetworkAdapter
+	StorageControllers []StorageController
 }
 
 // UpdateVMOptions configures mutable settings for UpdateVM.
 // Only non-nil fields are applied.
 type UpdateVMOptions struct {
-	Name            *string
-	CPUs            *int
-	Memory          *int
-	NetworkAdapters *[]NetworkAdapter
+	Name               *string
+	CPUs               *int
+	Memory             *int
+	NetworkAdapters    *[]NetworkAdapter
+	StorageControllers *[]StorageController
 }
 
 // HasChanges reports whether any mutable setting is set.
@@ -48,7 +51,8 @@ func (opts UpdateVMOptions) HasChanges() bool {
 	return opts.Name != nil ||
 		opts.CPUs != nil ||
 		opts.Memory != nil ||
-		opts.NetworkAdapters != nil
+		opts.NetworkAdapters != nil ||
+		opts.StorageControllers != nil
 }
 
 // CreateVM creates and registers a new virtual machine.
@@ -89,6 +93,10 @@ func (c *Client) CreateVM(ctx context.Context, name string, opts CreateVMOptions
 	}
 
 	if err := c.applyVMChanges(ctx, vm.UUID, changes); err != nil {
+		return nil, err
+	}
+
+	if err := c.syncStorageControllers(ctx, vm.UUID, opts.StorageControllers); err != nil {
 		return nil, err
 	}
 
@@ -191,6 +199,12 @@ func (c *Client) UpdateVM(ctx context.Context, id string, opts UpdateVMOptions) 
 
 	if err := c.applyVMChanges(ctx, id, opts); err != nil {
 		return nil, err
+	}
+
+	if opts.StorageControllers != nil {
+		if err := c.syncStorageControllers(ctx, id, *opts.StorageControllers); err != nil {
+			return nil, err
+		}
 	}
 
 	return c.GetVM(ctx, id)

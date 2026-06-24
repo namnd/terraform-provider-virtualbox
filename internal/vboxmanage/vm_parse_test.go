@@ -4,6 +4,8 @@
 package vboxmanage
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,11 +67,17 @@ func vmEqual(got, want *VM) bool {
 		got.UUID != want.UUID ||
 		got.CPUs != want.CPUs ||
 		got.Memory != want.Memory ||
-		len(got.NetworkAdapters) != len(want.NetworkAdapters) {
+		len(got.NetworkAdapters) != len(want.NetworkAdapters) ||
+		len(got.StorageControllers) != len(want.StorageControllers) {
 		return false
 	}
 	for i := range got.NetworkAdapters {
 		if got.NetworkAdapters[i] != want.NetworkAdapters[i] {
+			return false
+		}
+	}
+	for i := range got.StorageControllers {
+		if got.StorageControllers[i] != want.StorageControllers[i] {
 			return false
 		}
 	}
@@ -141,6 +149,38 @@ nic3="none"
 				},
 			},
 		},
+		{
+			name: "parses storage controllers",
+			stdout: `name="test-vm"
+UUID="abc-def-123"
+storagecontrollername0="IDE Controller"
+storagecontrollertype0="PIIX4"
+storagecontrollerbootable0="on"
+storagecontrollername1="SATA Controller"
+storagecontrollertype1="IntelAHCI"
+storagecontrollerportcount1="2"
+storagecontrollerbootable1="off"
+`,
+			want: &VM{
+				Name: "test-vm",
+				UUID: "abc-def-123",
+				StorageControllers: []StorageController{
+					{
+						Name:       "IDE Controller",
+						Type:       StorageBusIDE,
+						Controller: StorageChipPIIX4,
+						Bootable:   StorageBootableOn,
+					},
+					{
+						Name:       "SATA Controller",
+						Type:       StorageBusSATA,
+						Controller: StorageChipIntelAHCI,
+						Bootable:   StorageBootableOff,
+						PortCount:  2,
+					},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -193,6 +233,111 @@ nic4=""
 		if got[i] != want[i] {
 			t.Fatalf("parseNetworkAdapters()[%d] = %+v, want %+v", i, got[i], want[i])
 		}
+	}
+}
+
+func TestParseStorageControllers(t *testing.T) {
+	t.Parallel()
+
+	stdout := `storagecontrollername0="IDE Controller"
+storagecontrollertype0="PIIX4"
+storagecontrollerbootable0="on"
+storagecontrollername1="SATA Controller"
+storagecontrollertype1="AHCI"
+storagecontrollerportcount1="4"
+storagecontrollerbootable1="off"
+`
+	got := parseStorageControllers(stdout)
+	want := []StorageController{
+		{
+			Name:       "IDE Controller",
+			Type:       StorageBusIDE,
+			Controller: StorageChipPIIX4,
+			Bootable:   StorageBootableOn,
+		},
+		{
+			Name:       "SATA Controller",
+			Type:       StorageBusSATA,
+			Controller: StorageChipIntelAHCI,
+			Bootable:   StorageBootableOff,
+			PortCount:  4,
+		},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseStorageControllers() len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("parseStorageControllers()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseStorageControllerHostIOCache(t *testing.T) {
+	t.Parallel()
+
+	cfgFile := filepath.Join(t.TempDir(), "test.vbox")
+	xml := `<?xml version="1.0"?>
+<VirtualBox xmlns="http://www.virtualbox.org/">
+  <Machine>
+    <Hardware>
+      <StorageControllers>
+        <StorageController name="IDE Controller" type="PIIX4" PortCount="2" useHostIOCache="true" Bootable="true"/>
+        <StorageController name="SATA Controller" type="IntelAHCI" PortCount="4" useHostIOCache="false" Bootable="false"/>
+      </StorageControllers>
+    </Hardware>
+  </Machine>
+</VirtualBox>`
+	if err := os.WriteFile(cfgFile, []byte(xml), 0o644); err != nil {
+		t.Fatalf("failed to write cfg file: %v", err)
+	}
+
+	got, err := parseStorageControllerHostIOCache(cfgFile)
+	if err != nil {
+		t.Fatalf("parseStorageControllerHostIOCache() error: %v", err)
+	}
+	want := map[string]string{
+		"IDE Controller":  StorageHostIOCacheOn,
+		"SATA Controller": StorageHostIOCacheOff,
+	}
+	for name, cache := range want {
+		if got[name] != cache {
+			t.Fatalf("parseStorageControllerHostIOCache()[%q] = %q, want %q", name, got[name], cache)
+		}
+	}
+}
+
+func TestApplyStorageControllerHostIOCache(t *testing.T) {
+	t.Parallel()
+
+	cfgFile := filepath.Join(t.TempDir(), "test.vbox")
+	xml := `<?xml version="1.0"?>
+<VirtualBox xmlns="http://www.virtualbox.org/">
+  <Machine>
+    <Hardware>
+      <StorageControllers>
+        <StorageController name="IDE Controller" type="PIIX4" PortCount="2" useHostIOCache="true" Bootable="true"/>
+      </StorageControllers>
+    </Hardware>
+  </Machine>
+</VirtualBox>`
+	if err := os.WriteFile(cfgFile, []byte(xml), 0o644); err != nil {
+		t.Fatalf("failed to write cfg file: %v", err)
+	}
+
+	vm := &VM{
+		StorageControllers: []StorageController{
+			{
+				Name:       "IDE Controller",
+				Type:       StorageBusIDE,
+				Controller: StorageChipPIIX4,
+			},
+		},
+	}
+	applyStorageControllerHostIOCache(vm, cfgFile)
+
+	if vm.StorageControllers[0].HostIOCache != StorageHostIOCacheOn {
+		t.Fatalf("StorageControllers[0].HostIOCache = %q, want %q", vm.StorageControllers[0].HostIOCache, StorageHostIOCacheOn)
 	}
 }
 
