@@ -254,6 +254,12 @@ func (c *Client) CreateStorageAttachment(ctx context.Context, vmID string, opts 
 		return nil, err
 	}
 
+	return withVMLockValue(c, vmID, func() (*StorageAttachment, error) {
+		return c.createStorageAttachment(ctx, vmID, attachment)
+	})
+}
+
+func (c *Client) createStorageAttachment(ctx context.Context, vmID string, attachment StorageAttachment) (*StorageAttachment, error) {
 	stdout, err := c.getVMReadableOutput(ctx, vmID)
 	if err != nil {
 		return nil, err
@@ -280,12 +286,19 @@ func (c *Client) CreateStorageAttachment(ctx context.Context, vmID string, opts 
 		return nil, err
 	}
 
-	return c.GetStorageAttachment(ctx, vmID, attachment.ControllerName, attachment.Port, attachment.Device)
+	return c.getStorageAttachment(ctx, vmID, attachment.ControllerName, attachment.Port, attachment.Device)
 }
 
 // GetStorageAttachment returns information about a storage attachment.
 func (c *Client) GetStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) (*StorageAttachment, error) {
 	vmID = strings.TrimSpace(vmID)
+
+	return withVMLockValue(c, vmID, func() (*StorageAttachment, error) {
+		return c.getStorageAttachment(ctx, vmID, controllerName, port, device)
+	})
+}
+
+func (c *Client) getStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) (*StorageAttachment, error) {
 	controllerName = strings.TrimSpace(controllerName)
 	if vmID == "" {
 		return nil, errors.New("virtual machine id must not be empty")
@@ -294,11 +307,8 @@ func (c *Client) GetStorageAttachment(ctx context.Context, vmID, controllerName 
 		return nil, errors.New("controller_name must not be empty")
 	}
 
-	stdout, stderr, err := c.RunWithOutput(ctx, "showvminfo", vmID, "--machinereadable")
+	stdout, err := c.getVMReadableOutput(ctx, vmID)
 	if err != nil {
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return nil, vmErr
-		}
 		return nil, err
 	}
 
@@ -322,45 +332,47 @@ func (c *Client) UpdateStorageAttachment(ctx context.Context, vmID, controllerNa
 		return nil, errors.New("controller_name must not be empty")
 	}
 
-	current, err := c.GetStorageAttachment(ctx, vmID, controllerName, port, device)
-	if err != nil {
-		return nil, err
-	}
+	return withVMLockValue(c, vmID, func() (*StorageAttachment, error) {
+		current, err := c.getStorageAttachment(ctx, vmID, controllerName, port, device)
+		if err != nil {
+			return nil, err
+		}
 
-	updated := *current
-	if opts.Type != nil {
-		updated.Type = *opts.Type
-	}
-	if opts.Medium != nil {
-		updated.Medium = *opts.Medium
-	}
-	if opts.MediumType != nil {
-		updated.MediumType = *opts.MediumType
-	}
+		updated := *current
+		if opts.Type != nil {
+			updated.Type = *opts.Type
+		}
+		if opts.Medium != nil {
+			updated.Medium = *opts.Medium
+		}
+		if opts.MediumType != nil {
+			updated.MediumType = *opts.MediumType
+		}
 
-	if updated.Type == current.Type &&
-		strings.TrimSpace(updated.Medium) == strings.TrimSpace(current.Medium) &&
-		NormalizeStorageMediumType(updated.MediumType) == NormalizeStorageMediumType(current.MediumType) {
-		return current, nil
-	}
+		if updated.Type == current.Type &&
+			strings.TrimSpace(updated.Medium) == strings.TrimSpace(current.Medium) &&
+			NormalizeStorageMediumType(updated.MediumType) == NormalizeStorageMediumType(current.MediumType) {
+			return current, nil
+		}
 
-	if err := ValidateStorageAttachment(updated); err != nil {
-		return nil, err
-	}
+		if err := ValidateStorageAttachment(updated); err != nil {
+			return nil, err
+		}
 
-	if err := c.prepareVMForModify(ctx, vmID); err != nil {
-		return nil, err
-	}
+		if err := c.prepareVMForModify(ctx, vmID); err != nil {
+			return nil, err
+		}
 
-	args, err := buildStorageAttachArgs(vmID, updated)
-	if err != nil {
-		return nil, err
-	}
-	if err := c.runModifyVM(ctx, args...); err != nil {
-		return nil, err
-	}
+		args, err := buildStorageAttachArgs(vmID, updated)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.runModifyVM(ctx, args...); err != nil {
+			return nil, err
+		}
 
-	return c.GetStorageAttachment(ctx, vmID, controllerName, port, device)
+		return c.getStorageAttachment(ctx, vmID, controllerName, port, device)
+	})
 }
 
 // DeleteStorageAttachment removes a medium from a VM storage controller slot.
@@ -374,30 +386,24 @@ func (c *Client) DeleteStorageAttachment(ctx context.Context, vmID, controllerNa
 		return errors.New("controller_name must not be empty")
 	}
 
-	if _, err := c.GetStorageAttachment(ctx, vmID, controllerName, port, device); err != nil {
-		if errors.Is(err, ErrStorageAttachmentNotFound) {
-			return nil
+	return c.withVMLock(vmID, func() error {
+		if _, err := c.getStorageAttachment(ctx, vmID, controllerName, port, device); err != nil {
+			if errors.Is(err, ErrStorageAttachmentNotFound) {
+				return nil
+			}
+			return err
 		}
-		return err
-	}
 
-	if err := c.prepareVMForModify(ctx, vmID); err != nil {
-		return err
-	}
-
-	_, stderr, err := c.RunWithOutput(ctx,
-		"storageattach", vmID,
-		"--storagectl", controllerName,
-		"--port", strconv.Itoa(port),
-		"--device", strconv.Itoa(device),
-		"--medium", StorageMediumNone,
-	)
-	if err != nil {
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return vmErr
+		if err := c.prepareVMForModify(ctx, vmID); err != nil {
+			return err
 		}
-		return err
-	}
 
-	return nil
+		return c.runModifyVM(ctx,
+			"storageattach", vmID,
+			"--storagectl", controllerName,
+			"--port", strconv.Itoa(port),
+			"--device", strconv.Itoa(device),
+			"--medium", StorageMediumNone,
+		)
+	})
 }

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const (
@@ -92,15 +91,17 @@ func (c *Client) CreateVM(ctx context.Context, name string, opts CreateVMOptions
 		NetworkAdapters: &opts.NetworkAdapters,
 	}
 
-	if err := c.applyVMChanges(ctx, vm.UUID, changes); err != nil {
-		return nil, err
-	}
+	return withVMLockValue(c, vm.UUID, func() (*VM, error) {
+		if err := c.applyVMChanges(ctx, vm.UUID, changes); err != nil {
+			return nil, err
+		}
 
-	if err := c.syncStorageControllers(ctx, vm.UUID, opts.StorageControllers); err != nil {
-		return nil, err
-	}
+		if err := c.syncStorageControllers(ctx, vm.UUID, opts.StorageControllers); err != nil {
+			return nil, err
+		}
 
-	return c.GetVM(ctx, vm.UUID)
+		return c.getVM(ctx, vm.UUID)
+	})
 }
 
 func buildModifyVMArgs(id string, opts UpdateVMOptions) ([]string, error) {
@@ -159,11 +160,8 @@ func (c *Client) getVMReadableOutput(ctx context.Context, id string) (string, er
 		return "", errors.New("virtual machine id must not be empty")
 	}
 
-	stdout, stderr, err := c.RunWithOutput(ctx, "showvminfo", id, "--machinereadable")
+	stdout, _, err := c.RunWithOutput(ctx, "showvminfo", id, "--machinereadable")
 	if err != nil {
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return "", vmErr
-		}
 		return "", err
 	}
 
@@ -175,6 +173,12 @@ func (c *Client) getVMReadableOutput(ctx context.Context, id string) (string, er
 func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
 	id = strings.TrimSpace(id)
 
+	return withVMLockValue(c, id, func() (*VM, error) {
+		return c.getVM(ctx, id)
+	})
+}
+
+func (c *Client) getVM(ctx context.Context, id string) (*VM, error) {
 	stdout, err := c.getVMReadableOutput(ctx, id)
 	if err != nil {
 		return nil, err
@@ -205,50 +209,28 @@ func (c *Client) UpdateVM(ctx context.Context, id string, opts UpdateVMOptions) 
 		return nil, errors.New("at least one VM setting must be provided")
 	}
 
-	if err := c.prepareVMForModify(ctx, id); err != nil {
-		return nil, err
-	}
-
-	if err := c.applyVMChanges(ctx, id, opts); err != nil {
-		return nil, err
-	}
-
-	if opts.StorageControllers != nil {
-		if err := c.syncStorageControllers(ctx, id, *opts.StorageControllers); err != nil {
+	return withVMLockValue(c, id, func() (*VM, error) {
+		if err := c.prepareVMForModify(ctx, id); err != nil {
 			return nil, err
 		}
-	}
 
-	return c.GetVM(ctx, id)
+		if err := c.applyVMChanges(ctx, id, opts); err != nil {
+			return nil, err
+		}
+
+		if opts.StorageControllers != nil {
+			if err := c.syncStorageControllers(ctx, id, *opts.StorageControllers); err != nil {
+				return nil, err
+			}
+		}
+
+		return c.getVM(ctx, id)
+	})
 }
 
 func (c *Client) runUnregisterVM(ctx context.Context, id string) error {
-	const maxAttempts = 5
-
-	var lastErr error
-	for attempt := range maxAttempts {
-		_, stderr, err := c.RunWithOutput(ctx, "unregistervm", id, "--delete-all")
-		if err == nil {
-			return nil
-		}
-
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return vmErr
-		}
-
-		lastErr = err
-		if !isVMLockError(stderr) || attempt == maxAttempts-1 {
-			return err
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
-		}
-	}
-
-	return lastErr
+	_, _, err := c.RunWithOutput(ctx, "unregistervm", id, "--delete-all")
+	return err
 }
 
 // DeleteVM unregisters a virtual machine and deletes its associated files.
@@ -259,47 +241,18 @@ func (c *Client) DeleteVM(ctx context.Context, id string) error {
 		return errors.New("virtual machine id must not be empty")
 	}
 
-	if err := c.prepareVMForModify(ctx, id); err != nil {
-		return err
-	}
-
-	return c.runUnregisterVM(ctx, id)
-}
-
-func isVMLockError(stderr string) bool {
-	msg := strings.ToLower(stderr)
-	return strings.Contains(msg, "already locked") ||
-		strings.Contains(msg, "while it is locked") ||
-		strings.Contains(msg, "vbox_e_invalid_object_state")
-}
-
-func (c *Client) runModifyVM(ctx context.Context, args ...string) error {
-	const maxAttempts = 5
-
-	var lastErr error
-	for attempt := range maxAttempts {
-		_, stderr, err := c.RunWithOutput(ctx, args...)
-		if err == nil {
-			return nil
-		}
-
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return vmErr
-		}
-
-		lastErr = err
-		if !isVMLockError(stderr) || attempt == maxAttempts-1 {
+	return c.withVMLock(id, func() error {
+		if err := c.prepareVMForModify(ctx, id); err != nil {
 			return err
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(attempt+1) * 200 * time.Millisecond):
-		}
-	}
+		return c.runUnregisterVM(ctx, id)
+	})
+}
 
-	return lastErr
+func (c *Client) runModifyVM(ctx context.Context, args ...string) error {
+	_, _, err := c.RunWithOutput(ctx, args...)
+	return err
 }
 
 func (c *Client) applyVMChanges(ctx context.Context, id string, opts UpdateVMOptions) error {

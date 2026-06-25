@@ -51,6 +51,58 @@ func TestClassifyVMError(t *testing.T) {
 	}
 }
 
+func TestIsRetryableCommandError(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		stderr string
+		err    error
+		want   bool
+	}{
+		{
+			name:   "already locked",
+			stderr: "VBoxManage: error: The machine is already locked for a session",
+			want:   true,
+		},
+		{
+			name:   "object not ready",
+			stderr: "VBoxManage: error: The object is not ready\nDetails: code E_ACCESSDENIED (0x80070005), component SessionMachine",
+			want:   true,
+		},
+		{
+			name:   "functionality limited",
+			stderr: "VBoxManage: error: The object functionality is limited",
+			want:   true,
+		},
+		{
+			name:   "com server unavailable",
+			stderr: "VBoxManage: error: Failed to create the VirtualBox object!\nVBoxManage: error: Code NS_ERROR_FACTORY_NOT_REGISTERED (0x80040154)",
+			want:   true,
+		},
+		{
+			name: "segmentation fault",
+			err:  fmt.Errorf("signal: segmentation fault (core dumped)"),
+			want: true,
+		},
+		{
+			name:   "vm not found",
+			stderr: "VBoxManage: error: Could not find a registered machine named 'missing'",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := isRetryableCommandError(tt.stderr, tt.err); got != tt.want {
+				t.Fatalf("isRetryableCommandError(stderr=%q, err=%v) = %v, want %v", tt.stderr, tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCommandErrorError(t *testing.T) {
 	t.Parallel()
 

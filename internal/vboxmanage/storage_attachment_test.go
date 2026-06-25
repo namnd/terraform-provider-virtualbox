@@ -589,6 +589,70 @@ func readShowvminfoMachineReadableCount(t *testing.T, counterFile string) int {
 	return count
 }
 
+func TestGetVMReadableOutput_RetriesTransientError(t *testing.T) {
+	t.Parallel()
+
+	stateDir := filepath.Join(t.TempDir(), "state")
+	counterFile := filepath.Join(stateDir, "showvminfo_failures")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+
+STATE_DIR=%q
+FAILURES_FILE="$STATE_DIR/showvminfo_failures"
+mkdir -p "$STATE_DIR"
+
+case "$1" in
+showvminfo)
+	id="$2"
+	shift 2
+	machine_readable=false
+	for arg in "$@"; do
+		if [ "$arg" = "--machinereadable" ]; then
+			machine_readable=true
+		fi
+	done
+	if [ "$machine_readable" = true ]; then
+		failures=0
+		if [ -f "$FAILURES_FILE" ]; then
+			failures=$(cat "$FAILURES_FILE")
+		fi
+		if [ "$failures" -lt 2 ]; then
+			failures=$((failures + 1))
+			echo "$failures" > "$FAILURES_FILE"
+			echo "VBoxManage: error: The object is not ready" >&2
+			echo "VBoxManage: error: Details: code E_ACCESSDENIED (0x80070005), component SessionMachine" >&2
+			exit 1
+		fi
+		echo "name=\"vm-$id\""
+		echo "UUID=\"$id\""
+	fi
+	exit 0
+	;;
+*)
+	echo "unknown command: $1" >&2
+	exit 1
+	;;
+esac
+`, stateDir)
+
+	client := newTestClient(t, script)
+	stdout, err := client.getVMReadableOutput(context.Background(), "vm-1")
+	if err != nil {
+		t.Fatalf("getVMReadableOutput() error: %v", err)
+	}
+	if !strings.Contains(stdout, `name="vm-vm-1"`) {
+		t.Fatalf("getVMReadableOutput() stdout = %q, want vm name in output", stdout)
+	}
+
+	failures, err := os.ReadFile(counterFile)
+	if err != nil {
+		t.Fatalf("read failure counter: %v", err)
+	}
+	if strings.TrimSpace(string(failures)) != "2" {
+		t.Fatalf("showvminfo failure counter = %q, want 2 (retried after transient failures)", string(failures))
+	}
+}
+
 func TestCreateStorageAttachment_ShowvminfoCallCount(t *testing.T) {
 	t.Parallel()
 

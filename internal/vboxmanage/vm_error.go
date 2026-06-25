@@ -47,3 +47,30 @@ func classifyVMError(stderr string) error {
 		return nil
 	}
 }
+
+func isRetryableCommandError(stderr string, err error) bool {
+	if classifyVMError(stderr) != nil {
+		return false
+	}
+
+	msg := strings.ToLower(stderr)
+	if strings.Contains(msg, "already locked") ||
+		strings.Contains(msg, "while it is locked") ||
+		strings.Contains(msg, "vbox_e_invalid_object_state") ||
+		strings.Contains(msg, "the object is not ready") ||
+		strings.Contains(msg, "object functionality is limited") ||
+		strings.Contains(msg, "failed to create the virtualbox object") ||
+		strings.Contains(msg, "ns_error_factory_not_registered") ||
+		strings.Contains(msg, "com server is not running") ||
+		strings.Contains(msg, "failed to start") {
+		return true
+	}
+
+	if err == nil {
+		return false
+	}
+
+	errMsg := strings.ToLower(err.Error())
+	return strings.Contains(errMsg, "segmentation fault") ||
+		strings.Contains(errMsg, "signal:")
+}

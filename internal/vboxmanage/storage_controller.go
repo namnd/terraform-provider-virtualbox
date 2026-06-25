@@ -219,7 +219,7 @@ func storageControllerNeedsUpdate(current, desired StorageController) bool {
 }
 
 func (c *Client) syncStorageControllers(ctx context.Context, id string, desired []StorageController) error {
-	vm, err := c.GetVM(ctx, id)
+	vm, err := c.getVM(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -239,10 +239,7 @@ func (c *Client) syncStorageControllers(ctx context.Context, id string, desired 
 
 	for name := range currentByName {
 		if _, ok := desiredByName[name]; !ok {
-			if _, stderr, err := c.RunWithOutput(ctx, "storagectl", id, "--name", name, "--remove"); err != nil {
-				if vmErr := classifyVMError(stderr); vmErr != nil {
-					return vmErr
-				}
+			if err := c.runModifyVM(ctx, "storagectl", id, "--name", name, "--remove"); err != nil {
 				return err
 			}
 		}
