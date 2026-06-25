@@ -152,19 +152,31 @@ func intPtr(v int) *int {
 	return &v
 }
 
-// GetVM returns information about a registered virtual machine.
-// The id argument may be either the VM name or UUID.
-func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
+// getVMReadableOutput returns machine-readable showvminfo output for a VM.
+func (c *Client) getVMReadableOutput(ctx context.Context, id string) (string, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return nil, errors.New("virtual machine id must not be empty")
+		return "", errors.New("virtual machine id must not be empty")
 	}
 
 	stdout, stderr, err := c.RunWithOutput(ctx, "showvminfo", id, "--machinereadable")
 	if err != nil {
 		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return nil, vmErr
+			return "", vmErr
 		}
+		return "", err
+	}
+
+	return stdout, nil
+}
+
+// GetVM returns information about a registered virtual machine.
+// The id argument may be either the VM name or UUID.
+func (c *Client) GetVM(ctx context.Context, id string) (*VM, error) {
+	id = strings.TrimSpace(id)
+
+	stdout, err := c.getVMReadableOutput(ctx, id)
+	if err != nil {
 		return nil, err
 	}
 
@@ -310,17 +322,19 @@ func isVMNotRunningError(stderr string) bool {
 
 // prepareVMForModify ensures the VM is stopped so settings can be changed or it can be unregistered.
 func (c *Client) prepareVMForModify(ctx context.Context, id string) error {
-	stdout, stderr, err := c.RunWithOutput(ctx, "showvminfo", id, "--machinereadable")
+	stdout, err := c.getVMReadableOutput(ctx, id)
 	if err != nil {
-		if vmErr := classifyVMError(stderr); vmErr != nil {
-			return vmErr
-		}
 		return err
 	}
 
+	return c.prepareVMForModifyFromOutput(ctx, id, stdout)
+}
+
+// prepareVMForModifyFromOutput ensures the VM is stopped using already-fetched showvminfo output.
+func (c *Client) prepareVMForModifyFromOutput(ctx context.Context, id, stdout string) error {
 	switch parseVMState(stdout) {
 	case vmStateRunning, vmStatePaused:
-		_, stderr, err = c.RunWithOutput(ctx, "controlvm", id, "poweroff")
+		_, stderr, err := c.RunWithOutput(ctx, "controlvm", id, "poweroff")
 		if err != nil && !isVMNotRunningError(stderr) {
 			if vmErr := classifyVMError(stderr); vmErr != nil {
 				return vmErr
@@ -328,7 +342,7 @@ func (c *Client) prepareVMForModify(ctx context.Context, id string) error {
 			return err
 		}
 	case vmStateSaved:
-		_, stderr, err = c.RunWithOutput(ctx, "discardstate", id)
+		_, stderr, err := c.RunWithOutput(ctx, "discardstate", id)
 		if err != nil {
 			if vmErr := classifyVMError(stderr); vmErr != nil {
 				return vmErr

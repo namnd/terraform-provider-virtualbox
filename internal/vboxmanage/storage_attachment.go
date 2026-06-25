@@ -230,16 +230,12 @@ func findStorageAttachment(attachments []StorageAttachment, controllerName strin
 	return nil, fmt.Errorf("%w: controller %q port %d device %d", ErrStorageAttachmentNotFound, controllerName, port, device)
 }
 
-func (c *Client) validateStorageControllerExists(ctx context.Context, vmID, controllerName string) (*VM, error) {
-	vm, err := c.GetVM(ctx, vmID)
-	if err != nil {
-		return nil, err
-	}
+func validateStorageControllerOnVM(vm *VM, vmID, controllerName string) error {
 	if !controllerExists(vm, controllerName) {
-		return nil, fmt.Errorf("storage controller %q not found on VM %q, available controllers: %s",
+		return fmt.Errorf("storage controller %q not found on VM %q, available controllers: %s",
 			controllerName, vmID, strings.Join(controllerNames(vm), ", "))
 	}
-	return vm, nil
+	return nil
 }
 
 // CreateStorageAttachment attaches a medium to a VM storage controller.
@@ -258,11 +254,21 @@ func (c *Client) CreateStorageAttachment(ctx context.Context, vmID string, opts 
 		return nil, err
 	}
 
-	if _, err := c.validateStorageControllerExists(ctx, vmID, attachment.ControllerName); err != nil {
+	stdout, err := c.getVMReadableOutput(ctx, vmID)
+	if err != nil {
 		return nil, err
 	}
 
-	if err := c.prepareVMForModify(ctx, vmID); err != nil {
+	vm, err := parseShowVMInfoOutput(stdout)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := validateStorageControllerOnVM(vm, vmID, attachment.ControllerName); err != nil {
+		return nil, err
+	}
+
+	if err := c.prepareVMForModifyFromOutput(ctx, vmID, stdout); err != nil {
 		return nil, err
 	}
 

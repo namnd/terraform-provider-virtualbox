@@ -5,6 +5,10 @@ package vboxmanage
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -438,6 +442,203 @@ func TestStorageAttachmentClient(t *testing.T) {
 		_, err := client.GetStorageAttachment(ctx, "vm-1", "SATA Controller", 0, 0)
 		if err == nil || !strings.Contains(err.Error(), "storage attachment not found") {
 			t.Fatalf("GetStorageAttachment() error = %v, want not found", err)
+		}
+	})
+}
+
+func fakeStorageAttachmentScriptWithCounter(stateDir string) string {
+	return fmt.Sprintf(`#!/bin/sh
+set -eu
+
+STATE_DIR=%q
+COUNTER_FILE="$STATE_DIR/showvminfo_machinereadable_count"
+mkdir -p "$STATE_DIR"
+
+vm_state_path() {
+	echo "$STATE_DIR/$1"
+}
+
+attachments_file() {
+	echo "$(vm_state_path "$1").attachments"
+}
+
+storage_indices_path() {
+	echo "$(vm_state_path "$1").storage_indices"
+}
+
+storage_index_path() {
+	echo "$(vm_state_path "$1").storage_$2"
+}
+
+increment_showvminfo_counter() {
+	count=0
+	if [ -f "$COUNTER_FILE" ]; then
+		count=$(cat "$COUNTER_FILE")
+	fi
+	count=$((count + 1))
+	echo "$count" > "$COUNTER_FILE"
+}
+
+case "$1" in
+showvminfo)
+	id="$2"
+	shift 2
+	machine_readable=false
+	for arg in "$@"; do
+		if [ "$arg" = "--machinereadable" ]; then
+			machine_readable=true
+		fi
+	done
+	if [ "$machine_readable" = true ]; then
+		increment_showvminfo_counter
+		echo "name=\"vm-$id\""
+		echo "UUID=\"$id\""
+		indices_file="$(storage_indices_path "$id")"
+		if [ -f "$indices_file" ]; then
+			for idx in $(cat "$indices_file"); do
+				base="$(storage_index_path "$id" "$idx")"
+				if [ -f "${base}.name" ]; then
+					echo "storagecontrollername$idx=\"$(cat "${base}.name")\""
+				fi
+			done
+		fi
+		attachments="$(attachments_file "$id")"
+		if [ -f "$attachments" ]; then
+			while IFS='|' read -r controller type port device medium; do
+				[ -n "$controller" ] || continue
+				echo "\"$controller-$port-$device\"=\"$medium\""
+			done < "$attachments"
+		fi
+	fi
+	exit 0
+	;;
+storagectl)
+	id="$2"
+	shift 2
+	name=""
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--name) name="$2"; shift 2 ;;
+		--add) shift 2 ;;
+		*) shift ;;
+		esac
+	done
+	idx=0
+	indices_file="$(storage_indices_path "$id")"
+	if [ -f "$indices_file" ]; then
+		idx=$(wc -w < "$indices_file")
+	fi
+	if [ ! -f "$indices_file" ]; then
+		echo "$idx" > "$indices_file"
+	else
+		echo "$idx" >> "$indices_file"
+	fi
+	base="$(storage_index_path "$id" "$idx")"
+	echo "$name" > "${base}.name"
+	exit 0
+	;;
+storageattach)
+	id="$2"
+	shift 2
+	storagectl=""
+	port=""
+	device=""
+	medium=""
+	type="hdd"
+	while [ $# -gt 0 ]; do
+		case "$1" in
+		--storagectl) storagectl="$2"; shift 2 ;;
+		--port) port="$2"; shift 2 ;;
+		--device) device="$2"; shift 2 ;;
+		--medium) medium="$2"; shift 2 ;;
+		--type) type="$2"; shift 2 ;;
+		*) shift ;;
+		esac
+	done
+	attachments="$(attachments_file "$id")"
+	if [ ! -f "$attachments" ]; then
+		: > "$attachments"
+	fi
+	echo "$storagectl|$type|$port|$device|$medium" >> "$attachments"
+	exit 0
+	;;
+*)
+	echo "unknown command: $1" >&2
+	exit 1
+	;;
+esac
+`, stateDir)
+}
+
+func readShowvminfoMachineReadableCount(t *testing.T, counterFile string) int {
+	t.Helper()
+
+	data, err := os.ReadFile(counterFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0
+		}
+		t.Fatalf("read showvminfo counter: %v", err)
+	}
+
+	count, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("parse showvminfo counter %q: %v", string(data), err)
+	}
+
+	return count
+}
+
+func TestCreateStorageAttachment_ShowvminfoCallCount(t *testing.T) {
+	t.Parallel()
+
+	stateDir := filepath.Join(t.TempDir(), "state")
+	counterFile := filepath.Join(stateDir, "showvminfo_machinereadable_count")
+	client := newTestClient(t, fakeStorageAttachmentScriptWithCounter(stateDir))
+	ctx := context.Background()
+
+	_, _, err := client.RunWithOutput(ctx, "storagectl", "vm-1", "--name", "SATA Controller", "--add", "sata")
+	if err != nil {
+		t.Fatalf("storagectl setup error: %v", err)
+	}
+
+	t.Run("create uses one showvminfo before attach and one after", func(t *testing.T) {
+		attachment, err := client.CreateStorageAttachment(ctx, "vm-1", CreateStorageAttachmentOptions{
+			ControllerName: "SATA Controller",
+			Port:           0,
+			Device:         0,
+			Type:           StorageAttachmentTypeHDD,
+			Medium:         "/data/boot.vdi",
+		})
+		if err != nil {
+			t.Fatalf("CreateStorageAttachment() error: %v", err)
+		}
+		if attachment.Medium != "/data/boot.vdi" {
+			t.Fatalf("attachment.Medium = %q, want %q", attachment.Medium, "/data/boot.vdi")
+		}
+
+		if got := readShowvminfoMachineReadableCount(t, counterFile); got != 2 {
+			t.Fatalf("machine-readable showvminfo calls = %d, want 2 (1 before attach + 1 verify after attach)", got)
+		}
+	})
+
+	t.Run("controller not found uses one showvminfo", func(t *testing.T) {
+		if err := os.WriteFile(counterFile, []byte("0"), 0o644); err != nil {
+			t.Fatalf("reset showvminfo counter: %v", err)
+		}
+
+		_, err := client.CreateStorageAttachment(ctx, "vm-1", CreateStorageAttachmentOptions{
+			ControllerName: "Missing Controller",
+			Port:           0,
+			Device:         0,
+			Medium:         "/data/boot.vdi",
+		})
+		if err == nil || !strings.Contains(err.Error(), "storage controller") {
+			t.Fatalf("CreateStorageAttachment() error = %v, want controller not found error", err)
+		}
+
+		if got := readShowvminfoMachineReadableCount(t, counterFile); got != 1 {
+			t.Fatalf("machine-readable showvminfo calls = %d, want 1 (validation only)", got)
 		}
 	})
 }
