@@ -7,6 +7,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -333,6 +335,36 @@ func vmIPAddressTestPlan(t *testing.T, schema schema.Schema, attrs vmIPAddressTe
 		Schema: schema,
 		Raw:    vmIPAddressTestObjectValue(t, schema, attrs),
 	}
+}
+
+func vmIPAddressTestPlanFromModel(t *testing.T, s schema.Schema, model vmIPAddressResourceModel) tfsdk.Plan {
+	t.Helper()
+
+	plan := tfsdk.Plan{Schema: s}
+	diags := plan.Set(context.Background(), model)
+	if diags.HasError() {
+		t.Fatalf("plan.Set diagnostics: %v", diags)
+	}
+
+	return plan
+}
+
+func vmIPAddressTestTimeouts(t *testing.T, create string) timeouts.Value {
+	t.Helper()
+
+	obj, diags := types.ObjectValue(
+		map[string]attr.Type{
+			"create": types.StringType,
+		},
+		map[string]attr.Value{
+			"create": types.StringValue(create),
+		},
+	)
+	if diags.HasError() {
+		t.Fatalf("timeouts object diagnostics: %v", diags)
+	}
+
+	return timeouts.Value{Object: obj}
 }
 
 func vmIPAddressTestObjectValue(t *testing.T, s schema.Schema, attrs vmIPAddressTestAttributeValues) tftypes.Value {

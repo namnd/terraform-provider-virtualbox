@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
@@ -170,6 +171,98 @@ func TestVMIPAddressResourceCreate(t *testing.T) {
 		}
 		if mock.getVMIPAddressCalls != 0 {
 			t.Fatalf("getVMIPAddressCalls = %d, want 0", mock.getVMIPAddressCalls)
+		}
+	})
+
+	t.Run("applies default create timeout", func(t *testing.T) {
+		t.Parallel()
+
+		const deadlineSlack = 2 * time.Second
+
+		mock := &mockVirtualBox{
+			getVMFunc: func(context.Context, string) (*vboxmanage.VM, error) {
+				return &vboxmanage.VM{
+					NetworkAdapters: []vboxmanage.NetworkAdapter{
+						{
+							Type:       vboxmanage.NetworkTypeBridged,
+							MACAddress: "08:00:27:AA:BB:CC",
+						},
+					},
+				}, nil
+			},
+			getVMIPAddressFunc: func(ctx context.Context, _ string, _ vboxmanage.GetVMIPAddressOptions) (*string, error) {
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					t.Fatal("expected context deadline")
+				}
+
+				remaining := time.Until(deadline)
+				if remaining < vmIPAddressCreateTimeout-deadlineSlack || remaining > vmIPAddressCreateTimeout {
+					t.Fatalf("remaining = %v, want ~%v", remaining, vmIPAddressCreateTimeout)
+				}
+
+				ip := "192.168.1.42"
+				return &ip, nil
+			},
+		}
+		r := newTestVMIPAddressResource(t, mock)
+		plan := vmIPAddressTestPlan(t, schema, vmIPAddressTestAttributeValues{
+			Strings: map[string]types.String{
+				"vm_id": types.StringValue("uuid-vm-1"),
+			},
+		})
+
+		resp := &resource.CreateResponse{State: tfsdk.State{Schema: schema}}
+		r.Create(ctx, resource.CreateRequest{Plan: plan}, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
+		}
+	})
+
+	t.Run("applies configured create timeout", func(t *testing.T) {
+		t.Parallel()
+
+		const (
+			configuredTimeout = 30 * time.Second
+			deadlineSlack     = 2 * time.Second
+		)
+
+		mock := &mockVirtualBox{
+			getVMFunc: func(context.Context, string) (*vboxmanage.VM, error) {
+				return &vboxmanage.VM{
+					NetworkAdapters: []vboxmanage.NetworkAdapter{
+						{
+							Type:       vboxmanage.NetworkTypeBridged,
+							MACAddress: "08:00:27:AA:BB:CC",
+						},
+					},
+				}, nil
+			},
+			getVMIPAddressFunc: func(ctx context.Context, _ string, _ vboxmanage.GetVMIPAddressOptions) (*string, error) {
+				deadline, ok := ctx.Deadline()
+				if !ok {
+					t.Fatal("expected context deadline")
+				}
+
+				remaining := time.Until(deadline)
+				if remaining < configuredTimeout-deadlineSlack || remaining > configuredTimeout {
+					t.Fatalf("remaining = %v, want ~%v", remaining, configuredTimeout)
+				}
+
+				ip := "192.168.1.42"
+				return &ip, nil
+			},
+		}
+		r := newTestVMIPAddressResource(t, mock)
+		plan := vmIPAddressTestPlanFromModel(t, schema, vmIPAddressResourceModel{
+			VMID:     types.StringValue("uuid-vm-1"),
+			Timeouts: vmIPAddressTestTimeouts(t, "30s"),
+		})
+
+		resp := &resource.CreateResponse{State: tfsdk.State{Schema: schema}}
+		r.Create(ctx, resource.CreateRequest{Plan: plan}, resp)
+		if resp.Diagnostics.HasError() {
+			t.Fatalf("unexpected diagnostics: %v", resp.Diagnostics)
 		}
 	})
 

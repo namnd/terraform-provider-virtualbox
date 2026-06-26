@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const fakeVMIPAddressVBoxManageScript = `#!/bin/sh
@@ -265,14 +266,33 @@ fi
 	})
 }
 
+func testVMIPLookupContext(t *testing.T) context.Context {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	t.Cleanup(cancel)
+
+	return ctx
+}
+
 func TestGetVMIPAddress(t *testing.T) {
 	t.Run("empty id", func(t *testing.T) {
 		t.Parallel()
 
 		client := newTestClient(t, fakeVMIPAddressVBoxManageScript)
-		_, err := client.GetVMIPAddress(context.Background(), "  ", GetVMIPAddressOptions{})
+		_, err := client.GetVMIPAddress(testVMIPLookupContext(t), "  ", GetVMIPAddressOptions{})
 		if err == nil || !strings.Contains(err.Error(), "virtual machine id must not be empty") {
 			t.Fatalf("GetVMIPAddress() error = %v, want empty id error", err)
+		}
+	})
+
+	t.Run("missing context deadline", func(t *testing.T) {
+		t.Parallel()
+
+		client := newTestClient(t, fakeVMIPAddressVBoxManageScript)
+		_, err := client.GetVMIPAddress(context.Background(), "uuid-test-vm", GetVMIPAddressOptions{})
+		if !errors.Is(err, ErrContextDeadlineRequired) {
+			t.Fatalf("GetVMIPAddress() error = %v, want %v", err, ErrContextDeadlineRequired)
 		}
 	})
 
@@ -289,7 +309,7 @@ fi
 		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 		client := newTestClient(t, fakeVMIPAddressVBoxManageScript)
-		ip, err := client.GetVMIPAddress(context.Background(), "uuid-test-vm", GetVMIPAddressOptions{
+		ip, err := client.GetVMIPAddress(testVMIPLookupContext(t), "uuid-test-vm", GetVMIPAddressOptions{
 			NetworkAdapters: []NetworkAdapter{
 				{
 					Type:       NetworkTypeBridged,
@@ -310,6 +330,46 @@ fi
 		}
 		if state != "poweroff" {
 			t.Fatalf("vmState() = %q, want %q", state, "poweroff")
+		}
+	})
+
+	t.Run("times out waiting for arp entry", func(t *testing.T) {
+		binDir := t.TempDir()
+		arpPath := filepath.Join(binDir, "arp")
+		if err := os.WriteFile(arpPath, []byte(`#!/bin/sh
+if [ "$1" = "-a" ]; then
+  echo "? (192.168.1.55) at 08:00:27:de:ad:be [ether] on eth0"
+fi
+`), 0o755); err != nil {
+			t.Fatalf("failed to write fake arp script: %v", err)
+		}
+		t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+		client := newTestClient(t, fakeVMIPAddressVBoxManageScript)
+		stateDir := filepath.Join(filepath.Dir(client.binary), "state")
+		if err := os.MkdirAll(stateDir, 0o755); err != nil {
+			t.Fatalf("failed to create state dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(stateDir, "uuid-timeout-vm.state"), []byte("running"), 0o644); err != nil {
+			t.Fatalf("failed to seed vm state: %v", err)
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		_, err := client.GetVMIPAddress(ctx, "uuid-timeout-vm", GetVMIPAddressOptions{
+			NetworkAdapters: []NetworkAdapter{
+				{
+					Type:       NetworkTypeBridged,
+					MACAddress: "08:00:27:99:88:77",
+				},
+			},
+		})
+		if err == nil {
+			t.Fatal("GetVMIPAddress() error = nil, want timeout error")
+		}
+		if !errors.Is(err, context.DeadlineExceeded) && !strings.Contains(err.Error(), "timed out waiting for arp entry") {
+			t.Fatalf("GetVMIPAddress() error = %v, want timeout error", err)
 		}
 	})
 
@@ -334,7 +394,7 @@ fi
 			t.Fatalf("failed to seed vm state: %v", err)
 		}
 
-		ip, err := client.GetVMIPAddress(context.Background(), "uuid-running-vm", GetVMIPAddressOptions{
+		ip, err := client.GetVMIPAddress(testVMIPLookupContext(t), "uuid-running-vm", GetVMIPAddressOptions{
 			NetworkAdapters: []NetworkAdapter{
 				{
 					Type:       NetworkTypeBridged,

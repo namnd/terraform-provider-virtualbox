@@ -14,16 +14,15 @@ import (
 )
 
 const (
-	VMStartTypeHeadless      = "headless"
-	vmStartMaxAttempts       = 120
-	vmStartPollInterval      = 500 * time.Millisecond
-	vmPowerOffMaxAttempts    = 60
-	vmPowerOffPollInterval   = 500 * time.Millisecond
-	vmWriteLockMaxAttempts   = 15
-	vmWriteAccessSettle      = 1 * time.Second
-	vmWriteLockRetryBase     = 300 * time.Millisecond
-	vmIPLookupPollInterval   = 2 * time.Second
-	vmIPLookupDefaultTimeout = 60 * time.Second
+	VMStartTypeHeadless    = "headless"
+	vmStartMaxAttempts     = 120
+	vmStartPollInterval    = 500 * time.Millisecond
+	vmPowerOffMaxAttempts  = 60
+	vmPowerOffPollInterval = 500 * time.Millisecond
+	vmWriteLockMaxAttempts = 15
+	vmWriteAccessSettle    = 1 * time.Second
+	vmWriteLockRetryBase   = 300 * time.Millisecond
+	vmIPLookupPollInterval = 2 * time.Second
 )
 
 var (
@@ -33,6 +32,9 @@ var (
 	ErrVMLocked = errors.New("virtual machine is locked")
 
 	errIPNotFoundInARP = errors.New("ip address not found in arp table")
+
+	// ErrContextDeadlineRequired is returned when GetVMIPAddress is called without a context deadline.
+	ErrContextDeadlineRequired = errors.New("context must have a deadline")
 )
 
 // GetVMIPOptions configures GetVMIP.
@@ -47,6 +49,9 @@ func (c *Client) GetVMIPAddress(ctx context.Context, id string, opts GetVMIPAddr
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return nil, errors.New("virtual machine id must not be empty")
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		return nil, ErrContextDeadlineRequired
 	}
 
 	// for now, we only want to get IP address for Bridged type network adapter
@@ -63,9 +68,15 @@ func (c *Client) GetVMIPAddress(ctx context.Context, id string, opts GetVMIPAddr
 		return nil, fmt.Errorf("start virtual machine: %w", err)
 	}
 
-	var arpDeadline time.Time
-
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf(
+				"lookup ip address for mac %q: timed out waiting for arp entry while virtual machine is running: %w",
+				mac,
+				err,
+			)
+		}
+
 		state, err := c.vmStateRetry(ctx, id)
 		if err != nil {
 			return nil, err
@@ -79,7 +90,6 @@ func (c *Client) GetVMIPAddress(ctx context.Context, id string, opts GetVMIPAddr
 			if restarted {
 				started = true
 			}
-			arpDeadline = time.Time{}
 
 			select {
 			case <-ctx.Done():
@@ -87,10 +97,6 @@ func (c *Client) GetVMIPAddress(ctx context.Context, id string, opts GetVMIPAddr
 			case <-time.After(vmIPLookupPollInterval):
 			}
 			continue
-		}
-
-		if arpDeadline.IsZero() {
-			arpDeadline = time.Now().Add(vmIPLookupDefaultTimeout)
 		}
 
 		ip, err := lookupIPByMAC(ctx, mac)
@@ -107,17 +113,13 @@ func (c *Client) GetVMIPAddress(ctx context.Context, id string, opts GetVMIPAddr
 			return nil, fmt.Errorf("lookup ip address for mac %q: %w", mac, err)
 		}
 
-		if time.Now().After(arpDeadline) {
+		select {
+		case <-ctx.Done():
 			return nil, fmt.Errorf(
 				"lookup ip address for mac %q: timed out waiting for arp entry while virtual machine is running: %w",
 				mac,
-				context.DeadlineExceeded,
+				ctx.Err(),
 			)
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		case <-time.After(vmIPLookupPollInterval):
 		}
 	}

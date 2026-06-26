@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework-timeouts/resource/timeouts"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -15,6 +16,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/namnd/terraform-provider-virtualbox/internal/vboxmanage"
 )
+
+const vmIPAddressCreateTimeout = 120 * time.Second
 
 var _ resource.Resource = &vmIPAddressResource{}
 
@@ -28,9 +31,10 @@ type vmIPAddressResource struct {
 }
 
 type vmIPAddressResourceModel struct {
-	IP_Address  types.String `tfsdk:"ip_address"`
-	VMID        types.String `tfsdk:"vm_id"`
-	LastUpdated types.String `tfsdk:"last_updated"`
+	IP_Address  types.String   `tfsdk:"ip_address"`
+	VMID        types.String   `tfsdk:"vm_id"`
+	LastUpdated types.String   `tfsdk:"last_updated"`
+	Timeouts    timeouts.Value `tfsdk:"timeouts"`
 }
 
 func (r *vmIPAddressResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -54,7 +58,7 @@ func (r *vmIPAddressResource) Configure(_ context.Context, req resource.Configur
 	r.client = client
 }
 
-func (r *vmIPAddressResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
+func (r *vmIPAddressResource) Schema(ctx context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"ip_address": schema.StringAttribute{
@@ -72,6 +76,11 @@ func (r *vmIPAddressResource) Schema(_ context.Context, _ resource.SchemaRequest
 				},
 			},
 		},
+		Blocks: map[string]schema.Block{
+			"timeouts": timeouts.Block(ctx, timeouts.Opts{
+				Create: true,
+			}),
+		},
 	}
 }
 
@@ -81,6 +90,15 @@ func (r *vmIPAddressResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	createTimeout, diags := plan.Timeouts.Create(ctx, vmIPAddressCreateTimeout)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, createTimeout)
+	defer cancel()
 
 	vm, err := r.client.GetVM(ctx, plan.VMID.ValueString())
 	if err != nil {

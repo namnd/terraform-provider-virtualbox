@@ -19,7 +19,18 @@ description: |-
 
 - `vm_id` (String) UUID of the virtual machine.
 
+### Optional
+
+- `timeouts` (Block, Optional) (see [below for nested schema](#nestedblock--timeouts))
+
 ### Read-Only
 
 - `ip_address` (String) Storage attachment identifier in the form `<vm_id>/<controller_name>/<port>/<device>`.
 - `last_updated` (String)
+
+<a id="nestedblock--timeouts"></a>
+### Nested Schema for `timeouts`
+
+Optional:
+
+- `create` (String) A string that can be [parsed as a duration](https://pkg.go.dev/time#ParseDuration) consisting of numbers and unit suffixes, such as "30s" or "2h45m". Valid time units are "s" (seconds), "m" (minutes), "h" (hours).
