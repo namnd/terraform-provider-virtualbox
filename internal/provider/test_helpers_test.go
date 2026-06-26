@@ -308,3 +308,67 @@ func diskGetStateModel(t *testing.T, ctx context.Context, state tfsdk.State) dis
 
 	return model
 }
+
+type vmIPAddressTestAttributeValues struct {
+	Strings map[string]types.String
+}
+
+func vmIPAddressTestSchema(t *testing.T) schema.Schema {
+	t.Helper()
+
+	r := NewVMIPAddressResource()
+	resp := &resource.SchemaResponse{}
+	r.Schema(context.Background(), resource.SchemaRequest{}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("schema diagnostics: %v", resp.Diagnostics)
+	}
+
+	return resp.Schema
+}
+
+func vmIPAddressTestPlan(t *testing.T, schema schema.Schema, attrs vmIPAddressTestAttributeValues) tfsdk.Plan {
+	t.Helper()
+
+	return tfsdk.Plan{
+		Schema: schema,
+		Raw:    vmIPAddressTestObjectValue(t, schema, attrs),
+	}
+}
+
+func vmIPAddressTestObjectValue(t *testing.T, s schema.Schema, attrs vmIPAddressTestAttributeValues) tftypes.Value {
+	t.Helper()
+
+	ctx := context.Background()
+	objectType, ok := s.Type().TerraformType(ctx).(tftypes.Object)
+	if !ok {
+		t.Fatalf("expected tftypes.Object, got %T", s.Type().TerraformType(ctx))
+	}
+	tfAttrs := make(map[string]tftypes.Value, len(objectType.AttributeTypes))
+
+	for name, attrType := range objectType.AttributeTypes {
+		if value, ok := attrs.Strings[name]; ok {
+			tfValue, err := value.ToTerraformValue(ctx)
+			if err != nil {
+				t.Fatalf("failed to convert string %q to terraform value: %v", name, err)
+			}
+			tfAttrs[name] = tfValue
+			continue
+		}
+
+		tfAttrs[name] = tftypes.NewValue(attrType, nil)
+	}
+
+	return tftypes.NewValue(objectType, tfAttrs)
+}
+
+func vmIPAddressGetStateModel(t *testing.T, ctx context.Context, state tfsdk.State) vmIPAddressResourceModel {
+	t.Helper()
+
+	var model vmIPAddressResourceModel
+	diags := state.Get(ctx, &model)
+	if diags.HasError() {
+		t.Fatalf("state.Get diagnostics: %v", diags)
+	}
+
+	return model
+}

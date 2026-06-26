@@ -27,6 +27,7 @@ type mockVirtualBox struct {
 	updateStorageAttachmentCalls int
 	deleteStorageAttachmentCalls int
 	getStorageAttachmentCalls    int
+	getVMIPAddressCalls          int
 
 	createVMFunc                func(ctx context.Context, name string, opts vboxmanage.CreateVMOptions) (*vboxmanage.VM, error)
 	getVMFunc                   func(ctx context.Context, id string) (*vboxmanage.VM, error)
@@ -40,6 +41,7 @@ type mockVirtualBox struct {
 	getStorageAttachmentFunc    func(ctx context.Context, vmID, controllerName string, port, device int) (*vboxmanage.StorageAttachment, error)
 	updateStorageAttachmentFunc func(ctx context.Context, vmID, controllerName string, port, device int, opts vboxmanage.UpdateStorageAttachmentOptions) (*vboxmanage.StorageAttachment, error)
 	deleteStorageAttachmentFunc func(ctx context.Context, vmID, controllerName string, port, device int) error
+	getVMIPAddressFunc          func(ctx context.Context, id string, opts vboxmanage.GetVMIPAddressOptions) (*string, error)
 }
 
 func (m *mockVirtualBox) Version(context.Context) (string, error) {
@@ -217,6 +219,15 @@ func (m *mockVirtualBox) DeleteStorageAttachment(ctx context.Context, vmID, cont
 		return m.deleteStorageAttachmentFunc(ctx, vmID, controllerName, port, device)
 	}
 	return nil
+}
+
+func (m *mockVirtualBox) GetVMIPAddress(ctx context.Context, id string, opts vboxmanage.GetVMIPAddressOptions) (*string, error) {
+	m.getVMIPAddressCalls++
+	if m.getVMIPAddressFunc != nil {
+		return m.getVMIPAddressFunc(ctx, id, opts)
+	}
+	ip := "192.168.1.100"
+	return &ip, nil
 }
 
 func newTestVMResource(t *testing.T, client vboxmanage.VirtualBox) *vmResource {

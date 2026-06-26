@@ -21,4 +21,5 @@ type VirtualBox interface {
 	GetStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) (*StorageAttachment, error)
 	UpdateStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int, opts UpdateStorageAttachmentOptions) (*StorageAttachment, error)
 	DeleteStorageAttachment(ctx context.Context, vmID, controllerName string, port, device int) error
+	GetVMIPAddress(ctx context.Context, id string, opts GetVMIPAddressOptions) (*string, error)
 }
